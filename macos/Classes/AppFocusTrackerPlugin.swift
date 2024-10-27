@@ -4,10 +4,7 @@ import FlutterMacOS
 public class AppFocusTrackerPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     private var eventSink: FlutterEventSink?
     private var timer: Timer?
-
     private var activeAppName: String = "Unknown"
-    private var activeAppDuration: TimeInterval = 0
-    private var lastUpdateTime: Date = Date()
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterEventChannel(
@@ -31,7 +28,6 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     }
 
     private func startTracking() {
-        lastUpdateTime = Date()
         timer = Timer.scheduledTimer(
             timeInterval: 1.0,
             target: self,
@@ -49,27 +45,17 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     @objc private func sendAppInfo() {
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else { return }
         let currentAppName = frontmostApp.localizedName ?? "Unknown"
-        let currentTime = Date()
-        let timeElapsed = currentTime.timeIntervalSince(lastUpdateTime)
-        lastUpdateTime = currentTime
 
-        if currentAppName == activeAppName {
-            activeAppDuration += timeElapsed
-        } else {
-            if let eventSink = eventSink {
-                eventSink([
-                    "appName": activeAppName,
-                    "duration": Int(activeAppDuration),
-                ])
-            }
+        if currentAppName != activeAppName {
+            // Reset duration for the new app focus
             activeAppName = currentAppName
-            activeAppDuration = timeElapsed
         }
 
+        // Send event with a duration of 1 for each second in focus
         if let eventSink = eventSink {
             eventSink([
                 "appName": activeAppName,
-                "duration": Int(activeAppDuration),
+                "duration": 1,
             ])
         }
     }
