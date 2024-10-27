@@ -5,7 +5,7 @@ homepage:
 
 environment:
   sdk: ^3.5.3
-  flutter: '>=3.3.0'
+  flutter: ">=3.3.0"
 
 dependencies:
   flutter:
@@ -35,6 +35,8 @@ flutter:
   plugin:
     platforms:
       macos:
+        pluginClass: AppFocusTrackerPlugin
+      windows:
         pluginClass: AppFocusTrackerPlugin
 
   # To add assets to your plugin package, add an assets section, like this:
