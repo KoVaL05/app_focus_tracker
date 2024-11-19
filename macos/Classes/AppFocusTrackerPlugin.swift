@@ -29,7 +29,7 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin, FlutterStreamHandle
 
     private func startTracking() {
         timer = Timer.scheduledTimer(
-            timeInterval: 1.0,
+            timeInterval: 60.0,
             target: self,
             selector: #selector(sendAppInfo),
             userInfo: nil,
