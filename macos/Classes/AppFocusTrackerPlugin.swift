@@ -55,7 +55,7 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         if let eventSink = eventSink {
             eventSink([
                 "appName": activeAppName,
-                "duration": 1,
+                "duration": 60,
             ])
         }
     }
