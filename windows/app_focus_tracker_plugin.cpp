@@ -3,6 +3,7 @@
 #include <string>
 #include <chrono>
 #include <thread>
+#include <map>  // For std::map
 
 namespace {
 
@@ -38,7 +39,7 @@ void AppFocusTrackerPlugin::StartTracking() {
             }
 
             if (event_sink_) {
-                flutter::EncodableMap event;
+                std::map<flutter::EncodableValue, flutter::EncodableValue> event;
                 event[flutter::EncodableValue("appName")] = flutter::EncodableValue(activeAppName);
                 event[flutter::EncodableValue("duration")] = flutter::EncodableValue(1);
                 event_sink_->Success(event);

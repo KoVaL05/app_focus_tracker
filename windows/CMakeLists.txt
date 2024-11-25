@@ -98,3 +98,10 @@ add_custom_command(TARGET ${TEST_RUNNER} POST_BUILD
 include(GoogleTest)
 gtest_discover_tests(${TEST_RUNNER})
 endif()
+
+set(FLUTTER_SDK "${FLUTTER_ROOT}")
+if (NOT FLUTTER_SDK)
+    message(FATAL_ERROR "FLUTTER_ROOT is not set")
+endif()
+
+include_directories(${FLUTTER_SDK}/bin/cache/artifacts/engine/windows/include)
