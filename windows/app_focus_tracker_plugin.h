@@ -1,11 +1,13 @@
 #ifndef FLUTTER_PLUGIN_APP_FOCUS_TRACKER_PLUGIN_H_
 #define FLUTTER_PLUGIN_APP_FOCUS_TRACKER_PLUGIN_H_
 
+#include <flutter/encodable_value.h>
 #include <flutter/event_channel.h>
 #include <flutter/plugin_registrar_windows.h>
 #include <memory>
 #include <string>
 #include <thread>
+
 
 class AppFocusTrackerPlugin : public flutter::Plugin, public flutter::StreamHandler<flutter::EncodableValue> {
 public:

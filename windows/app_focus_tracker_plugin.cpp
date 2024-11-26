@@ -1,9 +1,13 @@
 #include "app_focus_tracker_plugin.h"
+
+#include <flutter/encodable_value.h>
+#include <flutter/event_channel.h>
+#include <flutter/standard_method_codec.h>
 #include <windows.h>
 #include <string>
-#include <chrono>
 #include <thread>
-#include <map>  // For std::map
+#include <chrono>
+#include <map> // For std::map
 
 namespace {
 
@@ -78,6 +82,10 @@ void AppFocusTrackerPlugin::RegisterWithRegistrar(flutter::PluginRegistrarWindow
     auto event_channel = std::make_unique<flutter::EventChannel<flutter::EncodableValue>>(
         registrar->messenger(), "app_focus_tracker", &flutter::StandardMethodCodec::GetInstance());
 
-    event_channel->SetStreamHandler(plugin.get());
+    event_channel->SetStreamHandler(std::make_unique<AppFocusTrackerPlugin>());
+
     registrar->AddPlugin(std::move(plugin));
 }
+
+
+
