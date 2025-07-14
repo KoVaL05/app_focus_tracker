@@ -1,18 +1,43 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:app_focus_tracker/app_focus_tracker_method_channel.dart';
+import 'package:app_focus_tracker/src/method_channel.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   MethodChannelAppFocusTracker platform = MethodChannelAppFocusTracker();
-  const MethodChannel channel = MethodChannel('app_focus_tracker');
+  const MethodChannel channel = MethodChannel('app_focus_tracker_method');
 
   setUp(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
       channel,
       (MethodCall methodCall) async {
-        return '42';
+        switch (methodCall.method) {
+          case 'getPlatformName':
+            return 'MockPlatform';
+          case 'isSupported':
+            return true;
+          case 'hasPermissions':
+            return true;
+          case 'requestPermissions':
+            return true;
+          case 'startTracking':
+            return null;
+          case 'stopTracking':
+            return null;
+          case 'isTracking':
+            return false;
+          case 'getCurrentFocusedApp':
+            return null;
+          case 'getRunningApplications':
+            return [];
+          case 'updateConfiguration':
+            return true;
+          case 'getDiagnosticInfo':
+            return {};
+          default:
+            return null;
+        }
       },
     );
   });
@@ -21,7 +46,7 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
   });
 
-  test('getPlatformVersion', () async {
-    expect(await platform.getPlatformVersion(), '42');
+  test('getPlatformName', () async {
+    expect(await platform.getPlatformName(), 'MockPlatform');
   });
 }

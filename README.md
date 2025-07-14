@@ -1,15 +1,195 @@
-# app_focus_tracker
+# App Focus Tracker
 
-A new Flutter plugin project.
+A Flutter plugin for tracking application focus changes across macOS and Windows platforms. This plugin provides real-time monitoring of which applications are currently in focus, enabling productivity tracking, time management, and user behavior analysis.
+
+## Features
+
+- **Cross-Platform Support**: Native implementations for macOS and Windows
+- **Real-Time Focus Tracking**: Stream-based API for live focus change events
+- **Application Information**: Detailed metadata about running applications
+- **Permission Management**: Automatic handling of platform-specific permissions
+- **Performance Optimized**: Efficient event handling with configurable update intervals
+- **Comprehensive Testing**: Extensive test suite covering unit, integration, and performance tests
+
+## Supported Platforms
+
+- **macOS**: Full support with accessibility permissions
+- **Windows**: Full support with process monitoring
+- **Other Platforms**: Graceful fallback with platform not supported exceptions
 
 ## Getting Started
 
-This project is a starting point for a Flutter
-[plug-in package](https://flutter.dev/to/develop-plugins),
-a specialized package that includes platform-specific implementation code for
-Android and/or iOS.
+### Installation
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Add the plugin to your `pubspec.yaml`:
+
+```yaml
+dependencies:
+  app_focus_tracker: ^0.0.1
+```
+
+### Basic Usage
+
+```dart
+import 'package:app_focus_tracker/app_focus_tracker.dart';
+
+void main() async {
+  // Initialize the tracker
+  final tracker = AppFocusTracker();
+  
+  // Check if the platform is supported
+  if (await tracker.isSupported()) {
+    // Request permissions (required on macOS)
+    final hasPermissions = await tracker.hasPermissions();
+    if (!hasPermissions) {
+      await tracker.requestPermissions();
+    }
+    
+    // Start tracking with custom configuration
+    await tracker.startTracking(
+      FocusTrackerConfig(
+        updateIntervalMs: 100, // Update every 100ms
+        includeSystemApps: false, // Exclude system applications
+      ),
+    );
+    
+    // Listen to focus events
+    tracker.focusStream.listen((event) {
+      print('App focused: ${event.appName}');
+      print('Duration: ${event.duration}');
+      print('Event type: ${event.eventType}');
+    });
+    
+    // Get current focused application
+    final currentApp = await tracker.getCurrentFocusedApp();
+    print('Currently focused: ${currentApp?.name}');
+    
+    // Get all running applications
+    final runningApps = await tracker.getRunningApplications();
+    print('Running apps: ${runningApps.length}');
+    
+    // Stop tracking when done
+    await tracker.stopTracking();
+  }
+}
+```
+
+### Configuration Options
+
+```dart
+FocusTrackerConfig(
+  updateIntervalMs: 100,        // How often to check for focus changes (ms)
+  includeSystemApps: false,     // Whether to include system applications
+  enableDurationTracking: true, // Track how long apps stay in focus
+  maxEventBufferSize: 1000,     // Maximum events to buffer
+)
+```
+
+### Event Types
+
+The plugin provides several types of focus events:
+
+- `FocusEventType.gained`: Application gained focus
+- `FocusEventType.lost`: Application lost focus  
+- `FocusEventType.durationUpdate`: Duration update for current app
+- `FocusEventType.switched`: Direct switch between applications
+
+## API Reference
+
+### Core Methods
+
+- `isSupported()`: Check if the current platform is supported
+- `hasPermissions()`: Check if required permissions are granted
+- `requestPermissions()`: Request platform-specific permissions
+- `startTracking(config)`: Start focus tracking with configuration
+- `stopTracking()`: Stop focus tracking
+- `isTracking()`: Check if tracking is currently active
+- `getCurrentFocusedApp()`: Get the currently focused application
+- `getRunningApplications()`: Get list of all running applications
+- `getDiagnosticInfo()`: Get diagnostic information about the tracker
+
+### Data Models
+
+#### FocusEvent
+```dart
+class FocusEvent {
+  final String eventId;
+  final String appName;
+  final String appIdentifier;
+  final FocusEventType eventType;
+  final DateTime timestamp;
+  final Duration? duration;
+  final Map<String, dynamic>? metadata;
+}
+```
+
+#### AppInfo
+```dart
+class AppInfo {
+  final String name;
+  final String identifier;
+  final int? processId;
+  final String? version;
+  final String? iconPath;
+  final String? executablePath;
+  final Map<String, dynamic>? metadata;
+}
+```
+
+## Platform-Specific Features
+
+### macOS
+- Accessibility permissions required
+- Bundle identifier extraction
+- App version information
+- Sandboxing support
+- Mission Control integration
+
+### Windows
+- Process monitoring via Win32 API
+- UWP application support
+- UAC elevation handling
+- Multi-monitor support
+- Virtual desktop detection
+
+## Error Handling
+
+The plugin provides comprehensive error handling with specific exception types:
+
+- `PlatformNotSupportedException`: Platform not supported
+- `PermissionDeniedException`: Required permissions not granted
+- `PlatformChannelException`: Platform communication errors
+- `AppFocusTrackerException`: General plugin errors
+
+## Testing
+
+The plugin includes an extensive test suite:
+
+- **Unit Tests**: Core functionality and data models
+- **Integration Tests**: End-to-end workflows and scenarios
+- **Platform-Specific Tests**: macOS and Windows specific features
+- **Performance Tests**: Stress testing and memory management
+- **Mock Platform**: Comprehensive simulation for testing
+
+Run tests with:
+```bash
+flutter test
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests for new functionality
+5. Ensure all tests pass
+6. Submit a pull request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for a list of changes and version history.
 
