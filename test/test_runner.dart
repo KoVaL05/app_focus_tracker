@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'models/focus_event_test.dart' as focus_event_tests;
 import 'models/app_info_test.dart' as app_info_tests;
 import 'models/focus_tracker_config_test.dart' as config_tests;
+import 'models/browser_info_test.dart' as browser_info_tests;
 
 // Core platform tests
 import 'platform_interface_test.dart' as platform_interface_tests;
@@ -24,6 +25,7 @@ void main() {
       group('FocusEvent', focus_event_tests.main);
       group('AppInfo', app_info_tests.main);
       group('FocusTrackerConfig', config_tests.main);
+      group('BrowserInfo', browser_info_tests.main);
     });
 
     group('🔌 Platform Interface Tests', () {
@@ -168,6 +170,11 @@ class TestRegistry {
       name: 'FocusTrackerConfig Tests',
       category: TestCategory.unit,
       estimatedDuration: Duration(seconds: 4),
+    ),
+    TestMetadata(
+      name: 'BrowserInfo Model Tests',
+      category: TestCategory.unit,
+      estimatedDuration: Duration(seconds: 2),
     ),
 
     // Platform Interface Tests
