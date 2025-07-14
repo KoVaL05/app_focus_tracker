@@ -2,6 +2,86 @@ import Cocoa
 import FlutterMacOS
 import ApplicationServices
 
+// MARK: - Browser Detection Helpers
+
+private let kBrowserBundleIdentifiers: Set<String> = [
+    "com.google.Chrome",
+    "com.microsoft.edgemac",
+    "org.mozilla.firefox",
+    "com.brave.Browser",
+    "com.operasoftware.Opera",
+    "com.apple.Safari"
+]
+
+private func isBrowserApp(_ app: NSRunningApplication) -> Bool {
+    guard let bundleId = app.bundleIdentifier else { return false }
+    return kBrowserBundleIdentifiers.contains(bundleId)
+}
+
+private func browserType(for bundleId: String?) -> String {
+    switch bundleId {
+    case "com.google.Chrome": return "chrome"
+    case "com.microsoft.edgemac": return "edge"
+    case "org.mozilla.firefox": return "firefox"
+    case "com.brave.Browser": return "brave"
+    case "com.operasoftware.Opera": return "opera"
+    case "com.apple.Safari": return "safari"
+    default: return "browser"
+    }
+}
+
+// Retrieve the window title of the focused window for a given app
+private func windowTitle(for app: NSRunningApplication) -> String? {
+    let axApp = AXUIElementCreateApplication(app.processIdentifier)
+    var value: CFTypeRef?
+    let result = AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &value)
+    guard result == .success, let window = value else {
+        return nil
+    }
+    var titleValue: CFTypeRef?
+    if AXUIElementCopyAttributeValue(window as! AXUIElement, kAXTitleAttribute as CFString, &titleValue) == .success,
+       let title = titleValue as? String {
+        return title
+    }
+    return nil
+}
+
+// Extract cleaned page title from a raw window title string
+private func cleanedPageTitle(from windowTitle: String) -> String {
+    let patterns = [
+        "(.+?)\\s*-\\s*Google Chrome",
+        "(.+?)\\s*-\\s*Microsoft Edge",
+        "(.+?)\\s*-\\s*Brave",
+        "(.+?)\\s*-\\s*Mozilla Firefox",
+        "(.+?)\\s*-\\s*Opera",
+        "(.+?)\\s*-\\s*Safari"
+    ]
+    for pattern in patterns {
+        if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) {
+            if let match = regex.firstMatch(in: windowTitle, options: [], range: NSRange(windowTitle.startIndex..., in: windowTitle)), match.numberOfRanges > 1 {
+                let range = match.range(at: 1)
+                if let swiftRange = Range(range, in: windowTitle) {
+                    return String(windowTitle[swiftRange]).trimmingCharacters(in: .whitespaces)
+                }
+            }
+        }
+    }
+    return windowTitle
+}
+
+// Extract domain from title if any
+private func extractDomain(from title: String) -> String? {
+    let pattern = "(?:https?://)?(?:www\\.)?([a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})"
+    guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
+    if let match = regex.firstMatch(in: title, options: [], range: NSRange(title.startIndex..., in: title)), match.numberOfRanges > 1 {
+        let range = match.range(at: 1)
+        if let swiftRange = Range(range, in: title) {
+            return String(title[swiftRange])
+        }
+    }
+    return nil
+}
+
 public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
     private var eventSink: FlutterEventSink?
     private var currentFocusedApp: AppInfo?
@@ -273,6 +353,13 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
         let identifier = app.bundleIdentifier ?? app.executableURL?.path ?? "unknown"
         let processId = Int(app.processIdentifier)
         
+        let rawWindowTitle = windowTitle(for: app)
+        let displayName: String
+        if let wTitle = rawWindowTitle, !wTitle.isEmpty {
+            displayName = wTitle
+        } else {
+            displayName = name
+        }
         var metadata: [String: Any] = [:]
         metadata["bundleURL"] = app.bundleURL?.path
         metadata["executableURL"] = app.executableURL?.path
@@ -280,7 +367,24 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
         metadata["isTerminated"] = app.isTerminated
         metadata["isHidden"] = app.isHidden
         metadata["activationPolicy"] = app.activationPolicy.rawValue
-        
+        if let w = rawWindowTitle { metadata["windowTitle"] = w }
+
+        let browserFlag = isBrowserApp(app)
+        metadata["isBrowser"] = browserFlag
+        if browserFlag, let wTitle = rawWindowTitle {
+            let pageTitle = cleanedPageTitle(from: wTitle)
+            let domain = extractDomain(from: pageTitle)
+            var tabInfo: [String: Any] = [
+                "title": pageTitle,
+                "browserType": browserType(for: app.bundleIdentifier)
+            ]
+            if let domain = domain {
+                tabInfo["domain"] = domain
+                tabInfo["url"] = "https://\(domain)"
+            }
+            metadata["browserTab"] = tabInfo
+        }
+
         // Get app version if available
         var version: String?
         if let bundleURL = app.bundleURL,
@@ -288,7 +392,7 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
             version = bundle.infoDictionary?["CFBundleShortVersionString"] as? String
             metadata["bundleVersion"] = bundle.infoDictionary?["CFBundleVersion"]
         }
-        
+
         // Get app icon path if available
         var iconPath: String?
         if let bundleURL = app.bundleURL {
@@ -297,9 +401,9 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
                 iconPath = iconFile.path
             }
         }
-        
+
         return AppInfo(
-            name: name,
+            name: displayName,
             identifier: identifier,
             processId: processId,
             version: version,

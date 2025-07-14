@@ -331,5 +331,66 @@ void main() {
         expect(event2.eventId, startsWith('evt_'));
       });
     });
+
+    group('Browser Information', () {
+      test('isBrowser returns true when metadata flag is set', () {
+        final event = FocusEvent(
+          appName: 'Google Chrome',
+          durationMicroseconds: 1000,
+          metadata: {'isBrowser': true},
+        );
+
+        expect(event.isBrowser, isTrue);
+      });
+
+      test('isBrowser returns false when flag missing or false', () {
+        final event1 = FocusEvent(
+          appName: 'Finder',
+          durationMicroseconds: 1000,
+        );
+        final event2 = FocusEvent(
+          appName: 'Edge',
+          durationMicroseconds: 1000,
+          metadata: {'isBrowser': false},
+        );
+
+        expect(event1.isBrowser, isFalse);
+        expect(event2.isBrowser, isFalse);
+      });
+
+      test('browserTab parses tab metadata into BrowserTabInfo', () {
+        final metadata = {
+          'isBrowser': true,
+          'browserTab': {
+            'domain': 'example.com',
+            'url': 'https://example.com',
+            'title': 'Example Domain',
+            'browserType': 'chrome',
+          }
+        };
+
+        final event = FocusEvent(
+          appName: 'Google Chrome - Example Domain',
+          durationMicroseconds: 1000,
+          metadata: metadata,
+        );
+
+        final tab = event.browserTab;
+        expect(tab, isNotNull);
+        expect(tab!.domain, equals('example.com'));
+        expect(tab.url, equals('https://example.com'));
+        expect(tab.title, equals('Example Domain'));
+        expect(tab.browserType, equals('chrome'));
+      });
+
+      test('browserTab returns null when metadata absent', () {
+        final event = FocusEvent(
+          appName: 'Not a browser',
+          durationMicroseconds: 1000,
+        );
+
+        expect(event.browserTab, isNull);
+      });
+    });
   });
 }

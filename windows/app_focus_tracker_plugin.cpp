@@ -15,6 +15,8 @@
 #include <chrono>
 #include <sstream>
 #include <iostream>
+#include <algorithm>
+#include <regex>
 
 namespace {
 
@@ -116,6 +118,89 @@ std::string GetFileVersion(const std::string& filePath) {
 }
 
 } // namespace
+
+// Add helper structures and functions for browser tab extraction
+// Browser tab information structure
+struct BrowserTabInfo {
+    std::string domain;
+    std::string url;
+    std::string title;
+    std::string browserType;
+    bool valid;
+    BrowserTabInfo() : valid(false) {}
+};
+
+// Detect whether a process corresponds to a common desktop browser
+static bool IsBrowserProcess(const std::string& process_name,
+                             const std::string& executable_path) {
+    static const std::set<std::string> kBrowserExecutables = {
+        "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe",
+        "opera.exe", "safari.exe", "chromium.exe"
+    };
+
+    // Normalise to lowercase for comparison
+    std::string lowered = process_name;
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(), ::tolower);
+    if (kBrowserExecutables.count(lowered) > 0) {
+        return true;
+    }
+
+    // Fallback: look for browser identifiers in executable path
+    std::string path_lower = executable_path;
+    std::transform(path_lower.begin(), path_lower.end(), path_lower.begin(), ::tolower);
+    for (const auto& key : {"chrome", "edge", "firefox", "brave", "opera", "safari", "chromium"}) {
+        if (path_lower.find(key) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Try to extract tab info (domain/title) from a window title string.
+static BrowserTabInfo ExtractBrowserTabInfo(const std::string& window_title,
+                                            const std::string& process_name) {
+    BrowserTabInfo info;
+
+    std::string proc_lower = process_name;
+    std::transform(proc_lower.begin(), proc_lower.end(), proc_lower.begin(), ::tolower);
+    if (proc_lower.find("chrome") != std::string::npos) {
+        info.browserType = "chrome";
+    } else if (proc_lower.find("edge") != std::string::npos) {
+        info.browserType = "edge";
+    } else if (proc_lower.find("firefox") != std::string::npos) {
+        info.browserType = "firefox";
+    } else if (proc_lower.find("brave") != std::string::npos) {
+        info.browserType = "brave";
+    } else if (proc_lower.find("opera") != std::string::npos) {
+        info.browserType = "opera";
+    } else if (proc_lower.find("safari") != std::string::npos) {
+        info.browserType = "safari";
+    } else {
+        info.browserType = "browser";
+    }
+
+    // Common patterns: "<page title> - <Browser Name>" or vice-versa.
+    // We capture everything before the last hyphen as title if the suffix matches a browser name.
+    std::regex pattern(R"((.+?)\s*-\s*(Google Chrome|Microsoft Edge|Brave|Mozilla Firefox|Opera|Safari))",
+                       std::regex::icase);
+    std::smatch match;
+    std::string page_title = window_title;
+    if (std::regex_match(window_title, match, pattern) && match.size() > 1) {
+        page_title = match[1].str();
+    }
+    info.title = page_title;
+
+    // Extract domain from title (look for something that looks like a hostname)
+    std::regex domain_regex(R"(([a-zA-Z0-9.-]+\.[a-zA-Z]{2,}))");
+    std::smatch domain_match;
+    if (std::regex_search(page_title, domain_match, domain_regex) && domain_match.size() > 1) {
+        info.domain = domain_match[1].str();
+        info.url = "https://" + info.domain;
+        info.valid = true;
+    }
+
+    return info;
+}
 
 // Configuration structure
 struct FocusTrackerConfig {
@@ -507,6 +592,21 @@ AppInfo AppFocusTrackerPlugin::CreateAppInfo(HWND hwnd) {
         if (GetWindowPlacement(hwnd, &placement)) {
             app_info.metadata[flutter::EncodableValue("isMaximized")] = 
                 flutter::EncodableValue(placement.showCmd == SW_SHOWMAXIMIZED);
+        }
+        // Check if application is a browser and extract tab info
+        if (IsBrowserProcess(proc_info.processName, proc_info.executablePath)) {
+            BrowserTabInfo tab = ExtractBrowserTabInfo(proc_info.windowTitle, proc_info.processName);
+            app_info.metadata[flutter::EncodableValue("isBrowser")] = flutter::EncodableValue(true);
+            if (tab.valid) {
+                flutter::EncodableMap tab_map;
+                tab_map[flutter::EncodableValue("domain")] = flutter::EncodableValue(tab.domain);
+                tab_map[flutter::EncodableValue("url")] = flutter::EncodableValue(tab.url);
+                tab_map[flutter::EncodableValue("title")] = flutter::EncodableValue(tab.title);
+                tab_map[flutter::EncodableValue("browserType")] = flutter::EncodableValue(tab.browserType);
+                app_info.metadata[flutter::EncodableValue("browserTab")] = flutter::EncodableValue(tab_map);
+            }
+        } else {
+            app_info.metadata[flutter::EncodableValue("isBrowser")] = flutter::EncodableValue(false);
         }
     }
     

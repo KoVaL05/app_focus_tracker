@@ -1,3 +1,5 @@
+import 'browser_tab_info.dart';
+
 /// Represents a single application focus event with timing information.
 ///
 /// This immutable class contains all the data associated with an application
@@ -30,6 +32,18 @@ class FocusEvent {
 
   /// Additional metadata about the application (version, icon path, etc.)
   final Map<String, dynamic>? metadata;
+
+  /// Whether the focused application is a recognised web browser
+  bool get isBrowser => (metadata?['isBrowser'] as bool?) ?? false;
+
+  /// Parsed browser tab info when [isBrowser] is true and data available
+  BrowserTabInfo? get browserTab {
+    final tabJson = metadata?['browserTab'];
+    if (tabJson is Map<String, dynamic>) {
+      return BrowserTabInfo.fromJson(tabJson);
+    }
+    return null;
+  }
 
   /// Creates a new [FocusEvent] instance.
   ///

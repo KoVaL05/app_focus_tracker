@@ -2,6 +2,8 @@
 ///
 /// This class provides comprehensive metadata about an application
 /// including platform-specific identifiers and optional details.
+import 'browser_tab_info.dart';
+
 class AppInfo {
   /// The display name of the application
   final String name;
@@ -61,6 +63,18 @@ class AppInfo {
       'executablePath': executablePath,
       'metadata': metadata,
     };
+  }
+
+  /// Whether this application is a recognised web browser.
+  bool get isBrowser => (metadata?['isBrowser'] as bool?) ?? false;
+
+  /// Parsed browser tab info when [isBrowser] is true and data available, otherwise null.
+  BrowserTabInfo? get browserTab {
+    final tabJson = metadata?['browserTab'];
+    if (tabJson is Map<String, dynamic>) {
+      return BrowserTabInfo.fromJson(tabJson);
+    }
+    return null;
   }
 
   @override

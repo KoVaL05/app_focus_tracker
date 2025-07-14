@@ -7,6 +7,7 @@ A Flutter plugin for tracking application focus changes across macOS and Windows
 - **Cross-Platform Support**: Native implementations for macOS and Windows
 - **Real-Time Focus Tracking**: Stream-based API for live focus change events
 - **Application Information**: Detailed metadata about running applications
+- **Browser Tab Extraction**: Automatic detection and parsing of web browser tabs (domain, URL, title)
 - **Permission Management**: Automatic handling of platform-specific permissions
 - **Performance Optimized**: Efficient event handling with configurable update intervals
 - **Comprehensive Testing**: Extensive test suite covering unit, integration, and performance tests
@@ -58,6 +59,17 @@ void main() async {
       print('App focused: ${event.appName}');
       print('Duration: ${event.duration}');
       print('Event type: ${event.eventType}');
+      
+      // Check if it's a browser and extract tab information
+      if (event.isBrowser) {
+        final tab = event.browserTab;
+        if (tab != null) {
+          print('Browser: ${tab.browserType}');
+          print('Domain: ${tab.domain}');
+          print('URL: ${tab.url}');
+          print('Title: ${tab.title}');
+        }
+      }
     });
     
     // Get current focused application
@@ -133,6 +145,22 @@ class AppInfo {
   final String? iconPath;
   final String? executablePath;
   final Map<String, dynamic>? metadata;
+  
+  /// Whether this application is a recognised web browser
+  bool get isBrowser;
+  
+  /// Parsed browser tab info when [isBrowser] is true
+  BrowserTabInfo? get browserTab;
+}
+```
+
+#### BrowserTabInfo
+```dart
+class BrowserTabInfo {
+  final String? domain;      // e.g., "stackoverflow.com"
+  final String? url;         // e.g., "https://stackoverflow.com"
+  final String title;        // Page title
+  final String browserType;  // "chrome", "edge", "firefox", etc.
 }
 ```
 
@@ -144,6 +172,7 @@ class AppInfo {
 - App version information
 - Sandboxing support
 - Mission Control integration
+- Browser tab extraction via Accessibility API
 
 ### Windows
 - Process monitoring via Win32 API
@@ -151,6 +180,7 @@ class AppInfo {
 - UAC elevation handling
 - Multi-monitor support
 - Virtual desktop detection
+- Browser tab extraction via window title parsing
 
 ## Error Handling
 
