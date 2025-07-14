@@ -80,6 +80,14 @@ abstract class AppFocusTrackerPlatform extends PlatformInterface {
     throw UnimplementedError('requestPermissions() has not been implemented.');
   }
 
+  /// Opens the system settings page for granting permissions.
+  ///
+  /// On macOS, this opens System Preferences > Security & Privacy > Privacy > Accessibility.
+  /// On Windows, this opens the Privacy & Security settings.
+  Future<void> openSystemSettings() {
+    throw UnimplementedError('openSystemSettings() has not been implemented.');
+  }
+
   /// Starts focus tracking with the given configuration.
   ///
   /// This begins monitoring application focus changes and will start

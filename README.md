@@ -182,6 +182,44 @@ class BrowserTabInfo {
 - Virtual desktop detection
 - Browser tab extraction via window title parsing
 
+## Platform Setup
+
+### macOS Setup
+For macOS applications using this plugin, you need to configure accessibility permissions:
+
+1. **Add to Info.plist**:
+   ```xml
+   <key>NSAccessibilityUsageDescription</key>
+   <string>This app needs accessibility permissions to track which applications have focus for productivity monitoring.</string>
+   ```
+
+2. **Configure Entitlements** (disable app sandbox for development):
+   ```xml
+   <key>com.apple.security.app-sandbox</key>
+   <false/>
+   ```
+
+3. **Run setup script**:
+   ```bash
+   ./docs/platform-setup/setup_accessibility.sh
+   ```
+
+See [macOS Setup Guide](docs/platform-setup/macos-setup.md) for detailed instructions.
+
+### Windows Setup
+Windows generally doesn't require special permissions, but you can verify configuration:
+
+1. **Run setup script**:
+   ```powershell
+   .\docs\platform-setup\setup_permissions.ps1
+   ```
+   or
+   ```cmd
+   docs\platform-setup\setup_permissions.bat
+   ```
+
+See [Windows Setup Guide](docs/platform-setup/windows-setup.md) for detailed instructions.
+
 ## Error Handling
 
 The plugin provides comprehensive error handling with specific exception types:

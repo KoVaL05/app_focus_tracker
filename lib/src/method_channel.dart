@@ -10,6 +10,7 @@ import 'models/focus_tracker_config.dart';
 import 'models/app_info.dart';
 import 'exceptions/app_focus_tracker_exception.dart';
 import 'stream_manager.dart';
+import 'utils/map_conversion.dart';
 
 /// An implementation of [AppFocusTrackerPlatform] that uses method channels
 /// with advanced stream management, retry mechanisms, and graceful degradation.
@@ -138,6 +139,22 @@ class MethodChannelAppFocusTracker extends AppFocusTrackerPlatform {
   }
 
   @override
+  Future<void> openSystemSettings() async {
+    return _withRetry('openSystemSettings', () async {
+      try {
+        await methodChannel.invokeMethod<void>('openSystemSettings');
+      } on PlatformException catch (e) {
+        throw PlatformChannelException(
+          'Failed to open system settings: ${e.message}',
+          channelName: 'openSystemSettings',
+          platformDetails: {'code': e.code, 'details': e.details},
+          cause: e,
+        );
+      }
+    });
+  }
+
+  @override
   Future<void> startTracking(FocusTrackerConfig config) async {
     // Validate configuration
     _validateConfiguration(config);
@@ -254,8 +271,21 @@ class MethodChannelAppFocusTracker extends AppFocusTrackerPlatform {
   Future<AppInfo?> getCurrentFocusedApp() async {
     return _withRetry('getCurrentFocusedApp', () async {
       try {
-        final result = await methodChannel.invokeMethod<Map<String, dynamic>>('getCurrentFocusedApp');
-        return result != null ? AppInfo.fromJson(result) : null;
+        final result = await methodChannel.invokeMethod('getCurrentFocusedApp');
+        if (result != null) {
+          // Safely convert the result to Map<String, dynamic>
+          final appMap = safeMapConversion(result);
+          if (appMap != null) {
+            return AppInfo.fromJson(appMap);
+          } else {
+            throw PlatformChannelException(
+              'Invalid app data format from platform channel',
+              channelName: 'getCurrentFocusedApp',
+              platformDetails: {'resultType': result.runtimeType.toString()},
+            );
+          }
+        }
+        return null;
       } on PlatformException catch (e) {
         throw PlatformChannelException(
           'Failed to get current focused app: ${e.message}',
@@ -271,11 +301,24 @@ class MethodChannelAppFocusTracker extends AppFocusTrackerPlatform {
   Future<List<AppInfo>> getRunningApplications({bool includeSystemApps = false}) async {
     return _withRetry('getRunningApplications', () async {
       try {
-        final result = await methodChannel.invokeMethod<List<dynamic>>(
+        final result = await methodChannel.invokeMethod(
           'getRunningApplications',
           {'includeSystemApps': includeSystemApps},
-        );
-        return result?.map((app) => AppInfo.fromJson(Map<String, dynamic>.from(app))).toList() ?? [];
+        ) as List<dynamic>?;
+        return result?.map((app) {
+              // Safely convert each app data to Map<String, dynamic>
+              final appMap = safeMapConversion(app);
+              if (appMap != null) {
+                return AppInfo.fromJson(appMap);
+              } else {
+                throw PlatformChannelException(
+                  'Invalid app data format: expected Map, got ${app.runtimeType}',
+                  channelName: 'getRunningApplications',
+                  platformDetails: {'dataType': app.runtimeType.toString()},
+                );
+              }
+            }).toList() ??
+            [];
       } on PlatformException catch (e) {
         throw PlatformChannelException(
           'Failed to get running applications: ${e.message}',
@@ -321,9 +364,10 @@ class MethodChannelAppFocusTracker extends AppFocusTrackerPlatform {
   Future<Map<String, dynamic>> getDiagnosticInfo() async {
     return _withRetry('getDiagnosticInfo', () async {
       try {
-        final result = await methodChannel.invokeMethod<Map<String, dynamic>>('getDiagnosticInfo');
+        final result = await methodChannel.invokeMethod('getDiagnosticInfo');
+        final diagnosticMap = safeMapConversion(result) ?? <String, dynamic>{};
         return {
-          ...?result,
+          ...diagnosticMap,
           'dartSide': {
             'isTracking': _isTracking,
             'currentConfig': _currentConfig?.toJson(),
@@ -354,7 +398,12 @@ class MethodChannelAppFocusTracker extends AppFocusTrackerPlatform {
     _eventSubscription = eventChannel.receiveBroadcastStream().listen(
       (dynamic event) {
         try {
-          final eventMap = Map<String, dynamic>.from(event);
+          // Safely convert the event data to Map<String, dynamic>
+          final eventMap = safeMapConversion(event);
+          if (eventMap == null) {
+            _handleError('eventChannel', 'Invalid event data format: expected Map, got ${event.runtimeType}');
+            return;
+          }
 
           // Add session ID if not present
           if (!eventMap.containsKey('sessionId')) {

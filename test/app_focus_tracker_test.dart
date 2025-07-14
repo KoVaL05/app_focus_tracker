@@ -1,7 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:app_focus_tracker/app_focus_tracker.dart';
 import 'package:app_focus_tracker/src/platform_interface.dart';
-import 'package:app_focus_tracker/src/method_channel.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 class MockAppFocusTrackerPlatform with MockPlatformInterfaceMixin implements AppFocusTrackerPlatform {
@@ -40,6 +39,9 @@ class MockAppFocusTrackerPlatform with MockPlatformInterfaceMixin implements App
 
   @override
   Future<Map<String, dynamic>> getDiagnosticInfo() => Future.value({});
+
+  @override
+  Future<void> openSystemSettings() => Future.value();
 }
 
 void main() {

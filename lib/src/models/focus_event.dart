@@ -1,4 +1,5 @@
 import 'browser_tab_info.dart';
+import '../utils/map_conversion.dart';
 
 /// Represents a single application focus event with timing information.
 ///
@@ -82,7 +83,7 @@ class FocusEvent {
       ),
       eventId: json['eventId'] as String?,
       sessionId: json['sessionId'] as String?,
-      metadata: json['metadata'] as Map<String, dynamic>?,
+      metadata: safeMapConversion(json['metadata']),
     );
   }
 

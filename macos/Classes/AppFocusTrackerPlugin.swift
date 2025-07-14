@@ -129,6 +129,10 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
             requestAccessibilityPermissions()
             result(hasAccessibilityPermissions())
             
+        case "openSystemSettings":
+            openSystemPreferences()
+            result(nil)
+            
         case "startTracking":
             if let args = call.arguments as? [String: Any],
                let configData = args["config"] as? [String: Any] {
@@ -169,6 +173,16 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
     private func requestAccessibilityPermissions() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true]
         AXIsProcessTrustedWithOptions(options as CFDictionary)
+    }
+    
+    private func openSystemPreferences() {
+        // Open System Preferences to the Accessibility section
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        } else {
+            // Fallback: open general System Preferences
+            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Library/PreferencePanes/Security.prefPane"))
+        }
     }
     
     // MARK: - Focus Tracking Implementation

@@ -5,7 +5,23 @@ import 'package:flutter/services.dart';
 import 'package:app_focus_tracker/app_focus_tracker.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(const AppFocusTrackerApp());
+}
+
+class AppFocusTrackerApp extends StatelessWidget {
+  const AppFocusTrackerApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'App Focus Tracker Example',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        useMaterial3: true,
+      ),
+      home: const MyApp(),
+    );
+  }
 }
 
 class MyApp extends StatefulWidget {
@@ -77,7 +93,31 @@ class _MyAppState extends State<MyApp> {
       });
 
       if (!granted) {
-        _showError('Permissions were not granted. Focus tracking will not work.');
+        // Show dialog asking user to open system settings
+        final shouldOpenSettings = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Permissions Required'),
+            content: const Text(
+              'Accessibility permissions are required for focus tracking. '
+              'Would you like to open System Settings to grant permissions?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Open Settings'),
+              ),
+            ],
+          ),
+        );
+
+        if (shouldOpenSettings == true) {
+          await _appFocusTracker.openSystemSettings();
+        }
       }
     } catch (e) {
       _showError('Failed to request permissions: $e');
@@ -218,12 +258,18 @@ class _MyAppState extends State<MyApp> {
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-      ),
-    );
+    // Only show error if widget is mounted and context is available
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } else {
+      // Fallback: print to console if widget is not mounted
+      print('Error: $message');
+    }
   }
 
   String _formatDuration(Duration duration) {
@@ -254,23 +300,78 @@ class _MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'App Focus Tracker Example',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        useMaterial3: true,
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('App Focus Tracker'),
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
-      home: Scaffold(
-        appBar: AppBar(
-          title: const Text('App Focus Tracker'),
-          backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        ),
-        body: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Platform Information Card
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Platform Information Card
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Platform Information',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 8),
+                    Text('Platform: $_platformName'),
+                    Text('Supported: ${_isSupported ? "Yes" : "No"}'),
+                    Text('Permissions: ${_hasPermissions ? "Granted" : "Required"}'),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // Control Buttons
+            Row(
+              children: [
+                if (!_hasPermissions)
+                  ElevatedButton.icon(
+                    onPressed: _requestPermissions,
+                    icon: const Icon(Icons.security),
+                    label: const Text('Request Permissions'),
+                  ),
+                if (_hasPermissions && !_isTracking)
+                  ElevatedButton.icon(
+                    onPressed: _startTracking,
+                    icon: const Icon(Icons.play_arrow),
+                    label: const Text('Start Tracking'),
+                  ),
+                if (_isTracking)
+                  ElevatedButton.icon(
+                    onPressed: _stopTracking,
+                    icon: const Icon(Icons.stop),
+                    label: const Text('Stop Tracking'),
+                  ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: _getRunningApps,
+                  icon: const Icon(Icons.apps),
+                  label: const Text('Apps'),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: _showDiagnostics,
+                  icon: const Icon(Icons.info),
+                  label: const Text('Diagnostics'),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 16),
+
+            // Current Focus Information
+            if (_isTracking) ...[
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16.0),
@@ -278,13 +379,20 @@ class _MyAppState extends State<MyApp> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Platform Information',
+                        'Current Focus',
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                       const SizedBox(height: 8),
-                      Text('Platform: $_platformName'),
-                      Text('Supported: ${_isSupported ? "Yes" : "No"}'),
-                      Text('Permissions: ${_hasPermissions ? "Granted" : "Required"}'),
+                      Text(
+                        'App: $_currentApp',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      Text('Duration: ${_formatDuration(_currentDuration)}'),
+                      if (_currentAppInfo != null) ...[
+                        Text('Process ID: ${_currentAppInfo!.processId ?? "N/A"}'),
+                        Text('Identifier: ${_currentAppInfo!.identifier}'),
+                        if (_currentAppInfo!.version != null) Text('Version: ${_currentAppInfo!.version}'),
+                      ],
                     ],
                   ),
                 ),
@@ -292,146 +400,77 @@ class _MyAppState extends State<MyApp> {
 
               const SizedBox(height: 16),
 
-              // Control Buttons
-              Row(
-                children: [
-                  if (!_hasPermissions)
-                    ElevatedButton.icon(
-                      onPressed: _requestPermissions,
-                      icon: const Icon(Icons.security),
-                      label: const Text('Request Permissions'),
-                    ),
-                  if (_hasPermissions && !_isTracking)
-                    ElevatedButton.icon(
-                      onPressed: _startTracking,
-                      icon: const Icon(Icons.play_arrow),
-                      label: const Text('Start Tracking'),
-                    ),
-                  if (_isTracking)
-                    ElevatedButton.icon(
-                      onPressed: _stopTracking,
-                      icon: const Icon(Icons.stop),
-                      label: const Text('Stop Tracking'),
-                    ),
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: _getRunningApps,
-                    icon: const Icon(Icons.apps),
-                    label: const Text('Apps'),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: _showDiagnostics,
-                    icon: const Icon(Icons.info),
-                    label: const Text('Diagnostics'),
-                  ),
-                ],
+              // Recent Events
+              Text(
+                'Recent Events',
+                style: Theme.of(context).textTheme.titleLarge,
               ),
-
-              const SizedBox(height: 16),
-
-              // Current Focus Information
-              if (_isTracking) ...[
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Current Focus',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'App: $_currentApp',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        Text('Duration: ${_formatDuration(_currentDuration)}'),
-                        if (_currentAppInfo != null) ...[
-                          Text('Process ID: ${_currentAppInfo!.processId ?? "N/A"}'),
-                          Text('Identifier: ${_currentAppInfo!.identifier}'),
-                          if (_currentAppInfo!.version != null) Text('Version: ${_currentAppInfo!.version}'),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 16),
-
-                // Recent Events
-                Text(
-                  'Recent Events',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: Card(
-                    child: _recentEvents.isEmpty
-                        ? const Center(
-                            child: Text(
-                              'No events yet...\nSwitch between applications to see events.',
-                              textAlign: TextAlign.center,
-                            ),
-                          )
-                        : ListView.builder(
-                            itemCount: _recentEvents.length,
-                            itemBuilder: (context, index) {
-                              final event = _recentEvents[index];
-                              return ListTile(
-                                leading: Text(
-                                  _getEventTypeIcon(event.eventType),
-                                  style: const TextStyle(fontSize: 20),
-                                ),
-                                title: Text(event.appName),
-                                subtitle: Text(
-                                  '${event.eventType.name} • ${_formatDuration(Duration(microseconds: event.durationMicroseconds))}',
-                                ),
-                                trailing: Text(
-                                  '${event.timestamp.hour.toString().padLeft(2, '0')}:'
-                                  '${event.timestamp.minute.toString().padLeft(2, '0')}:'
-                                  '${event.timestamp.second.toString().padLeft(2, '0')}',
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                ),
-                              );
-                            },
+              const SizedBox(height: 8),
+              Expanded(
+                child: Card(
+                  child: _recentEvents.isEmpty
+                      ? const Center(
+                          child: Text(
+                            'No events yet...\nSwitch between applications to see events.',
+                            textAlign: TextAlign.center,
                           ),
-                  ),
+                        )
+                      : ListView.builder(
+                          itemCount: _recentEvents.length,
+                          itemBuilder: (context, index) {
+                            final event = _recentEvents[index];
+                            return ListTile(
+                              leading: Text(
+                                _getEventTypeIcon(event.eventType),
+                                style: const TextStyle(fontSize: 20),
+                              ),
+                              title: Text(event.appName),
+                              subtitle: Text(
+                                '${event.eventType.name} • ${_formatDuration(Duration(microseconds: event.durationMicroseconds))}',
+                              ),
+                              trailing: Text(
+                                '${event.timestamp.hour.toString().padLeft(2, '0')}:'
+                                '${event.timestamp.minute.toString().padLeft(2, '0')}:'
+                                '${event.timestamp.second.toString().padLeft(2, '0')}',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            );
+                          },
+                        ),
                 ),
-              ] else ...[
-                const Expanded(
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.visibility_off,
-                          size: 64,
+              ),
+            ] else ...[
+              const Expanded(
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.visibility_off,
+                        size: 64,
+                        color: Colors.grey,
+                      ),
+                      SizedBox(height: 16),
+                      Text(
+                        'Focus tracking is not active',
+                        style: TextStyle(
+                          fontSize: 18,
                           color: Colors.grey,
                         ),
-                        SizedBox(height: 16),
-                        Text(
-                          'Focus tracking is not active',
-                          style: TextStyle(
-                            fontSize: 18,
-                            color: Colors.grey,
-                          ),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'Start tracking to see real-time focus events',
+                        style: TextStyle(
+                          color: Colors.grey,
                         ),
-                        SizedBox(height: 8),
-                        Text(
-                          'Start tracking to see real-time focus events',
-                          style: TextStyle(
-                            color: Colors.grey,
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
+              ),
             ],
-          ),
+          ],
         ),
       ),
     );
