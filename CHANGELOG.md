@@ -1,3 +1,18 @@
+## 0.0.2
+
+### Bug Fixes
+
+**Platform Compatibility:**
+- Fixed `MissingPluginException` when calling `updateConfiguration()` on platforms that don't implement this optional method
+- Added graceful fallback to Dart-side configuration updates for backward compatibility
+- Enhanced `safeMapConversion()` to handle nested `Map<Object?, Object?>` structures from platform channels
+- Resolved type casting errors in `getRunningApplications()` by ensuring all map keys are converted to String
+
+**Error Handling:**
+- Improved error recovery for missing native method implementations
+- Better handling of platform channel data type mismatches
+- Enhanced debugging output for map conversion failures
+
 ## 0.0.1
 
 ### Initial Release
