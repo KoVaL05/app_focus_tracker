@@ -3,6 +3,7 @@
 /// This class provides comprehensive metadata about an application
 /// including platform-specific identifiers and optional details.
 import 'browser_tab_info.dart';
+import '../utils/map_conversion.dart';
 
 class AppInfo {
   /// The display name of the application
@@ -48,7 +49,7 @@ class AppInfo {
       version: json['version'] as String?,
       iconPath: json['iconPath'] as String?,
       executablePath: json['executablePath'] as String?,
-      metadata: json['metadata'] as Map<String, dynamic>?,
+      metadata: safeMapConversion(json['metadata']),
     );
   }
 

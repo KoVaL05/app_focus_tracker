@@ -113,6 +113,13 @@ class MockAppFocusTrackerPlatform extends AppFocusTrackerPlatform {
   }
 
   @override
+  Future<void> openSystemSettings() async {
+    await _simulateDelay();
+    _throwIfSimulatingErrors('openSystemSettings');
+    // Mock implementation - just return successfully
+  }
+
+  @override
   Future<void> startTracking(FocusTrackerConfig config) async {
     await _simulateDelay();
     _throwIfSimulatingErrors('startTracking');
@@ -466,12 +473,12 @@ class _MacOSMockPlatform extends MockAppFocusTrackerPlatform {
     required String platformName,
     required bool hasPermissions,
     required bool simulatePermissionRequest,
-  }) : _currentPermissions = hasPermissions,
-       super(
-         platformName: platformName,
-         hasPermissions: hasPermissions,
-         simulatePermissionRequest: simulatePermissionRequest,
-       );
+  })  : _currentPermissions = hasPermissions,
+        super(
+          platformName: platformName,
+          hasPermissions: hasPermissions,
+          simulatePermissionRequest: simulatePermissionRequest,
+        );
 
   bool _currentPermissions;
 
@@ -540,22 +547,22 @@ class _WindowsMockPlatform extends MockAppFocusTrackerPlatform {
     required bool hasPermissions,
     required bool simulatePermissionRequest,
   }) : super(
-         platformName: platformName,
-         hasPermissions: hasPermissions,
-         simulatePermissionRequest: simulatePermissionRequest,
-       );
+          platformName: platformName,
+          hasPermissions: hasPermissions,
+          simulatePermissionRequest: simulatePermissionRequest,
+        );
 
   @override
   Map<String, dynamic> get diagnosticInfo => {
-    'platform': platformName,
-    'version': '1.0.0-windows-mock',
-    'systemVersion': 'Windows 10.0.19041',
-    'capabilities': ['focus_tracking', 'app_enumeration', 'win32_api'],
-    'performance': {
-      'cpu_usage': 0.3,
-      'memory_usage': 2048 * 1024, // 2MB
-    },
-  };
+        'platform': platformName,
+        'version': '1.0.0-windows-mock',
+        'systemVersion': 'Windows 10.0.19041',
+        'capabilities': ['focus_tracking', 'app_enumeration', 'win32_api'],
+        'performance': {
+          'cpu_usage': 0.3,
+          'memory_usage': 2048 * 1024, // 2MB
+        },
+      };
 
   @override
   Future<List<AppInfo>> getRunningApplications({bool includeSystemApps = false}) async {

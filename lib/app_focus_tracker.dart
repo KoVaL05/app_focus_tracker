@@ -82,6 +82,12 @@ class AppFocusTracker {
   /// May throw [PermissionDeniedException] with platform-specific details.
   Future<bool> requestPermissions() => _platform.requestPermissions();
 
+  /// Opens the system settings page for granting permissions.
+  ///
+  /// On macOS, this opens System Preferences > Security & Privacy > Privacy > Accessibility.
+  /// On Windows, this opens the Privacy & Security settings.
+  Future<void> openSystemSettings() => _platform.openSystemSettings();
+
   /// Starts focus tracking with the given configuration.
   ///
   /// [config] - Optional configuration for tracking behavior.

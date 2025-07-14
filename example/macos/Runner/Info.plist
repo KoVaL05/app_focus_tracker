@@ -28,5 +28,7 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSAccessibilityUsageDescription</key>
+	<string>This app needs accessibility permissions to track which applications have focus for productivity monitoring.</string>
 </dict>
 </plist>

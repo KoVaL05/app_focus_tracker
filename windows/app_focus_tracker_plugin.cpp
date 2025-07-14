@@ -7,6 +7,7 @@
 #include <windows.h>
 #include <psapi.h>
 #include <tlhelp32.h>
+#include <shellapi.h>
 #include <string>
 #include <memory>
 #include <map>
@@ -361,10 +362,39 @@ void AppFocusTrackerPlugin::HandleMethodCall(
         result->Success(flutter::EncodableValue(true));
     }
     else if (method == "hasPermissions") {
-        result->Success(flutter::EncodableValue(true)); // Windows generally doesn't require special permissions
+        // Check if we can access window information (basic permission check)
+        HWND testWindow = GetForegroundWindow();
+        if (testWindow != NULL) {
+            DWORD processId;
+            if (GetWindowThreadProcessId(testWindow, &processId)) {
+                result->Success(flutter::EncodableValue(true));
+            } else {
+                result->Success(flutter::EncodableValue(false));
+            }
+        } else {
+            result->Success(flutter::EncodableValue(false));
+        }
     }
     else if (method == "requestPermissions") {
-        result->Success(flutter::EncodableValue(true)); // Windows generally doesn't require special permissions
+        // On Windows, try to set up event hooks to verify permissions
+        HWINEVENTHOOK testHook = SetWinEventHook(
+            EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
+            NULL, NULL, 0, 0,
+            WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS
+        );
+        
+        if (testHook != NULL) {
+            UnhookWinEvent(testHook);
+            result->Success(flutter::EncodableValue(true));
+        } else {
+            // If hooks fail, it might be due to UAC or antivirus
+            result->Success(flutter::EncodableValue(false));
+        }
+    }
+    else if (method == "openSystemSettings") {
+        // On Windows, open the Privacy & Security settings
+        ShellExecuteA(NULL, "open", "ms-settings:privacy", NULL, NULL, SW_SHOW);
+        result->Success();
     }
     else if (method == "startTracking") {
         if (method_call.arguments() && std::holds_alternative<flutter::EncodableMap>(*method_call.arguments())) {
@@ -694,7 +724,22 @@ flutter::EncodableMap AppFocusTrackerPlugin::GetDiagnosticInfo() {
     
     diagnostics[flutter::EncodableValue("platform")] = flutter::EncodableValue("Windows");
     diagnostics[flutter::EncodableValue("isTracking")] = flutter::EncodableValue(is_tracking_);
-    diagnostics[flutter::EncodableValue("hasPermissions")] = flutter::EncodableValue(true);
+    // Check actual permissions
+    HWND testWindow = GetForegroundWindow();
+    bool hasWindowAccess = (testWindow != NULL);
+    HWINEVENTHOOK testHook = SetWinEventHook(
+        EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
+        NULL, NULL, 0, 0,
+        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS
+    );
+    bool hasHookAccess = (testHook != NULL);
+    if (testHook != NULL) {
+        UnhookWinEvent(testHook);
+    }
+    
+    diagnostics[flutter::EncodableValue("hasPermissions")] = flutter::EncodableValue(hasWindowAccess && hasHookAccess);
+    diagnostics[flutter::EncodableValue("hasWindowAccess")] = flutter::EncodableValue(hasWindowAccess);
+    diagnostics[flutter::EncodableValue("hasHookAccess")] = flutter::EncodableValue(hasHookAccess);
     diagnostics[flutter::EncodableValue("sessionId")] = flutter::EncodableValue(session_id_);
     diagnostics[flutter::EncodableValue("config")] = flutter::EncodableValue(config_.ToMap());
     
