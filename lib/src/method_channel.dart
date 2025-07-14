@@ -349,7 +349,27 @@ class MethodChannelAppFocusTracker extends AppFocusTrackerPlatform {
           _setupEventStream();
         }
         return result ?? false;
+      } on MissingPluginException {
+        // Native side does not implement this optional method. Fall back to
+        // Dart-side only update so that callers do not crash on older plugin
+        // versions.
+        _currentConfig = config;
+        await _streamManager?.stop();
+        _streamManager = _createStreamManager(config);
+        await _streamManager?.start();
+        _setupEventStream();
+        return true;
       } on PlatformException catch (e) {
+        if (e.code == 'unimplemented') {
+          // Graceful degradation if the native layer hasn't yet implemented
+          // this optional method.
+          _currentConfig = config;
+          await _streamManager?.stop();
+          _streamManager = _createStreamManager(config);
+          await _streamManager?.start();
+          _setupEventStream();
+          return true;
+        }
         throw PlatformChannelException(
           'Failed to update configuration: ${e.message}',
           channelName: 'updateConfiguration',

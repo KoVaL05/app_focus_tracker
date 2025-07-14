@@ -14,15 +14,15 @@ Map<String, dynamic>? safeMapConversion(dynamic input) {
 
   if (input is Map) {
     try {
-      return Map<String, dynamic>.fromEntries(
-        input.entries.map((entry) {
-          final key = entry.key?.toString();
-          if (key == null) {
-            throw ArgumentError('Map entry has null key');
-          }
-          return MapEntry(key, entry.value);
-        }),
-      );
+      Map<String, dynamic> converted = {};
+      for (final entry in input.entries) {
+        final keyString = entry.key?.toString();
+        if (keyString == null) {
+          throw ArgumentError('Map entry has null key');
+        }
+        converted[keyString] = _convertValue(entry.value);
+      }
+      return converted;
     } catch (e) {
       if (kDebugMode) {
         print('Failed to convert Map to Map<String, dynamic>: $e');
@@ -32,4 +32,16 @@ Map<String, dynamic>? safeMapConversion(dynamic input) {
   }
 
   return null;
+}
+
+// Recursively converts nested structures so that all Map keys are String and
+// List elements are converted as well.
+dynamic _convertValue(dynamic value) {
+  if (value is Map) {
+    return safeMapConversion(value);
+  }
+  if (value is List) {
+    return value.map(_convertValue).toList();
+  }
+  return value;
 }
