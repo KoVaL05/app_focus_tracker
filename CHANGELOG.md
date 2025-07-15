@@ -1,3 +1,15 @@
+## 0.0.5
+
+### Bug Fixes
+
+**Windows Compilation:**
+- Fixed Windows compilation error C2280: "AppFocusTrackerPlugin::AppFocusTrackerPlugin(const AppFocusTrackerPlugin &)": attempt to reference a deleted function
+- Fixed Windows compilation warning C4244: conversion from 'int' to 'char', possible loss of data (treated as error)
+- Replaced invalid copy construction with lightweight `AppFocusTrackerStreamHandler` wrapper to avoid copying plugin instances
+- Updated `std::transform` calls with `::tolower` to use safe lambda functions with explicit type casting
+- Added missing `<cctype>` include for proper `std::tolower` usage
+- All Windows compilation errors and warnings now resolved
+
 ## 0.0.4
 
 ### Bug Fixes

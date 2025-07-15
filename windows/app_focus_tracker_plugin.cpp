@@ -17,6 +17,7 @@
 #include <sstream>
 #include <iostream>
 #include <algorithm>
+#include <cctype>
 #include <regex>
 #include <UIAutomation.h>
 #pragma comment(lib, "Oleacc.lib")
@@ -338,14 +339,14 @@ static bool IsBrowserProcess(const std::string& process_name,
 
     // Normalise to lowercase for comparison
     std::string lowered = process_name;
-    std::transform(lowered.begin(), lowered.end(), lowered.begin(), ::tolower);
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     if (kBrowserExecutables.count(lowered) > 0) {
         return true;
     }
 
     // Fallback: look for browser identifiers in executable path
     std::string path_lower = executable_path;
-    std::transform(path_lower.begin(), path_lower.end(), path_lower.begin(), ::tolower);
+    std::transform(path_lower.begin(), path_lower.end(), path_lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     for (const auto& key : {"chrome", "edge", "firefox", "brave", "opera", "safari", "chromium"}) {
         if (path_lower.find(key) != std::string::npos) {
             return true;
@@ -365,7 +366,7 @@ static BrowserTabInfo ExtractBrowserTabInfo(const std::string& window_title,
     #endif
 
     std::string proc_lower = process_name;
-    std::transform(proc_lower.begin(), proc_lower.end(), proc_lower.begin(), ::tolower);
+    std::transform(proc_lower.begin(), proc_lower.end(), proc_lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     if (proc_lower.find("chrome") != std::string::npos) {
         info.browserType = "chrome";
     } else if (proc_lower.find("edge") != std::string::npos) {
@@ -591,7 +592,27 @@ void AppFocusTrackerPlugin::RegisterWithRegistrar(flutter::PluginRegistrarWindow
     auto event_channel = std::make_unique<flutter::EventChannel<flutter::EncodableValue>>(
         registrar->messenger(), "app_focus_tracker_events", &flutter::StandardMethodCodec::GetInstance());
     
-    event_channel->SetStreamHandler(std::make_unique<AppFocusTrackerPlugin>(*plugin));
+    // Forward declaration of wrapper class
+    class AppFocusTrackerStreamHandler : public flutter::StreamHandler<flutter::EncodableValue> {
+    public:
+        AppFocusTrackerStreamHandler(AppFocusTrackerPlugin* plugin) : plugin_(plugin) {}
+        ~AppFocusTrackerStreamHandler() override = default;
+
+        std::unique_ptr<flutter::StreamHandlerError<flutter::EncodableValue>> OnListenInternal(
+            const flutter::EncodableValue* arguments,
+            std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&& events) override {
+            return plugin_->OnListenInternal(arguments, std::move(events));
+        }
+
+        std::unique_ptr<flutter::StreamHandlerError<flutter::EncodableValue>> OnCancelInternal(const flutter::EncodableValue* arguments) override {
+            return plugin_->OnCancelInternal(arguments);
+        }
+
+    private:
+        AppFocusTrackerPlugin* plugin_;
+    };
+
+    event_channel->SetStreamHandler(std::make_unique<AppFocusTrackerStreamHandler>(plugin.get()));
     
     registrar->AddPlugin(std::move(plugin));
 }
