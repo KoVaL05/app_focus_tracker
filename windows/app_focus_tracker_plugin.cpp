@@ -462,116 +462,97 @@ static BrowserTabInfo ExtractBrowserTabInfo(const std::string& window_title,
     return info;
 }
 
-// Configuration structure
-struct FocusTrackerConfig {
-    int updateIntervalMs = 1000;
-    bool includeMetadata = false;
-    bool includeSystemApps = false;
-    bool enableBrowserTabTracking = false;
-    std::set<std::string> excludedApps;
-    std::set<std::string> includedApps;
+// Implementation of FocusTrackerConfig methods
+FocusTrackerConfig FocusTrackerConfig::FromMap(const flutter::EncodableMap& map) {
+    FocusTrackerConfig config;
     
-    static FocusTrackerConfig FromMap(const flutter::EncodableMap& map) {
-        FocusTrackerConfig config;
-        
-        auto it = map.find(flutter::EncodableValue("updateIntervalMs"));
-        if (it != map.end() && std::holds_alternative<int>(it->second)) {
-            config.updateIntervalMs = std::get<int>(it->second);
-        }
-        
-        it = map.find(flutter::EncodableValue("includeMetadata"));
-        if (it != map.end() && std::holds_alternative<bool>(it->second)) {
-            config.includeMetadata = std::get<bool>(it->second);
-        }
-        
-        it = map.find(flutter::EncodableValue("includeSystemApps"));
-        if (it != map.end() && std::holds_alternative<bool>(it->second)) {
-            config.includeSystemApps = std::get<bool>(it->second);
-        }
-        
-        it = map.find(flutter::EncodableValue("enableBrowserTabTracking"));
-        if (it != map.end() && std::holds_alternative<bool>(it->second)) {
-            config.enableBrowserTabTracking = std::get<bool>(it->second);
-        }
-        
-        it = map.find(flutter::EncodableValue("excludedApps"));
-        if (it != map.end() && std::holds_alternative<flutter::EncodableList>(it->second)) {
-            auto list = std::get<flutter::EncodableList>(it->second);
-            for (const auto& item : list) {
-                if (std::holds_alternative<std::string>(item)) {
-                    config.excludedApps.insert(std::get<std::string>(item));
-                }
-            }
-        }
-        
-        it = map.find(flutter::EncodableValue("includedApps"));
-        if (it != map.end() && std::holds_alternative<flutter::EncodableList>(it->second)) {
-            auto list = std::get<flutter::EncodableList>(it->second);
-            for (const auto& item : list) {
-                if (std::holds_alternative<std::string>(item)) {
-                    config.includedApps.insert(std::get<std::string>(item));
-                }
-            }
-        }
-        
-        return config;
+    auto it = map.find(flutter::EncodableValue("updateIntervalMs"));
+    if (it != map.end() && std::holds_alternative<int>(it->second)) {
+        config.updateIntervalMs = std::get<int>(it->second);
     }
     
-    flutter::EncodableMap ToMap() const {
-        flutter::EncodableMap map;
-        map[flutter::EncodableValue("updateIntervalMs")] = flutter::EncodableValue(updateIntervalMs);
-        map[flutter::EncodableValue("includeMetadata")] = flutter::EncodableValue(includeMetadata);
-        map[flutter::EncodableValue("includeSystemApps")] = flutter::EncodableValue(includeSystemApps);
-        map[flutter::EncodableValue("enableBrowserTabTracking")] = flutter::EncodableValue(enableBrowserTabTracking);
-        
-        flutter::EncodableList excludedList;
-        for (const auto& app : excludedApps) {
-            excludedList.push_back(flutter::EncodableValue(app));
-        }
-        map[flutter::EncodableValue("excludedApps")] = flutter::EncodableValue(excludedList);
-        
-        flutter::EncodableList includedList;
-        for (const auto& app : includedApps) {
-            includedList.push_back(flutter::EncodableValue(app));
-        }
-        map[flutter::EncodableValue("includedApps")] = flutter::EncodableValue(includedList);
-        
-        return map;
+    it = map.find(flutter::EncodableValue("includeMetadata"));
+    if (it != map.end() && std::holds_alternative<bool>(it->second)) {
+        config.includeMetadata = std::get<bool>(it->second);
     }
-};
+    
+    it = map.find(flutter::EncodableValue("includeSystemApps"));
+    if (it != map.end() && std::holds_alternative<bool>(it->second)) {
+        config.includeSystemApps = std::get<bool>(it->second);
+    }
+    
+    it = map.find(flutter::EncodableValue("enableBrowserTabTracking"));
+    if (it != map.end() && std::holds_alternative<bool>(it->second)) {
+        config.enableBrowserTabTracking = std::get<bool>(it->second);
+    }
+    
+    it = map.find(flutter::EncodableValue("excludedApps"));
+    if (it != map.end() && std::holds_alternative<flutter::EncodableList>(it->second)) {
+        auto list = std::get<flutter::EncodableList>(it->second);
+        for (const auto& item : list) {
+            if (std::holds_alternative<std::string>(item)) {
+                config.excludedApps.insert(std::get<std::string>(item));
+            }
+        }
+    }
+    
+    it = map.find(flutter::EncodableValue("includedApps"));
+    if (it != map.end() && std::holds_alternative<flutter::EncodableList>(it->second)) {
+        auto list = std::get<flutter::EncodableList>(it->second);
+        for (const auto& item : list) {
+            if (std::holds_alternative<std::string>(item)) {
+                config.includedApps.insert(std::get<std::string>(item));
+            }
+        }
+    }
+    
+    return config;
+}
 
-// App information structure
-struct AppInfo {
-    std::string name;
-    std::string identifier;
-    DWORD processId;
-    std::string version;
-    std::string iconPath;
-    std::string executablePath;
-    flutter::EncodableMap metadata;
+flutter::EncodableMap FocusTrackerConfig::ToMap() const {
+    flutter::EncodableMap map;
+    map[flutter::EncodableValue("updateIntervalMs")] = flutter::EncodableValue(updateIntervalMs);
+    map[flutter::EncodableValue("includeMetadata")] = flutter::EncodableValue(includeMetadata);
+    map[flutter::EncodableValue("includeSystemApps")] = flutter::EncodableValue(includeSystemApps);
+    map[flutter::EncodableValue("enableBrowserTabTracking")] = flutter::EncodableValue(enableBrowserTabTracking);
     
-    flutter::EncodableMap ToMap() const {
-        flutter::EncodableMap map;
-        map[flutter::EncodableValue("name")] = flutter::EncodableValue(name);
-        map[flutter::EncodableValue("identifier")] = flutter::EncodableValue(identifier);
-        map[flutter::EncodableValue("processId")] = flutter::EncodableValue(static_cast<int>(processId));
-        
-        if (!version.empty()) {
-            map[flutter::EncodableValue("version")] = flutter::EncodableValue(version);
-        }
-        if (!iconPath.empty()) {
-            map[flutter::EncodableValue("iconPath")] = flutter::EncodableValue(iconPath);
-        }
-        if (!executablePath.empty()) {
-            map[flutter::EncodableValue("executablePath")] = flutter::EncodableValue(executablePath);
-        }
-        if (!metadata.empty()) {
-            map[flutter::EncodableValue("metadata")] = flutter::EncodableValue(metadata);
-        }
-        
-        return map;
+    flutter::EncodableList excludedList;
+    for (const auto& app : excludedApps) {
+        excludedList.push_back(flutter::EncodableValue(app));
     }
-};
+    map[flutter::EncodableValue("excludedApps")] = flutter::EncodableValue(excludedList);
+    
+    flutter::EncodableList includedList;
+    for (const auto& app : includedApps) {
+        includedList.push_back(flutter::EncodableValue(app));
+    }
+    map[flutter::EncodableValue("includedApps")] = flutter::EncodableValue(includedList);
+    
+    return map;
+}
+
+// Implementation of AppInfo methods
+flutter::EncodableMap AppInfo::ToMap() const {
+    flutter::EncodableMap map;
+    map[flutter::EncodableValue("name")] = flutter::EncodableValue(name);
+    map[flutter::EncodableValue("identifier")] = flutter::EncodableValue(identifier);
+    map[flutter::EncodableValue("processId")] = flutter::EncodableValue(static_cast<int>(processId));
+    
+    if (!version.empty()) {
+        map[flutter::EncodableValue("version")] = flutter::EncodableValue(version);
+    }
+    if (!iconPath.empty()) {
+        map[flutter::EncodableValue("iconPath")] = flutter::EncodableValue(iconPath);
+    }
+    if (!executablePath.empty()) {
+        map[flutter::EncodableValue("executablePath")] = flutter::EncodableValue(executablePath);
+    }
+    if (!metadata.empty()) {
+        map[flutter::EncodableValue("metadata")] = flutter::EncodableValue(metadata);
+    }
+    
+    return map;
+}
 
 // Global variables for event handling
 static AppFocusTrackerPlugin* g_plugin_instance = nullptr;

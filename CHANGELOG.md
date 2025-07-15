@@ -1,3 +1,14 @@
+## 0.0.4
+
+### Bug Fixes
+
+**Windows Compilation:**
+- Fixed Windows compilation error where `FocusTrackerConfig` struct was undefined in header file
+- Moved `FocusTrackerConfig` and `AppInfo` struct definitions from `.cpp` to `.h` file to resolve C2079 error
+- Added proper method implementations with scope resolution operators in `.cpp` file
+- Added missing includes (`<set>`, `<map>`) to header file for struct member types
+- Maintained proper separation of interface and implementation while fixing compilation issues
+
 ## 0.0.3
 
 ### New Features
