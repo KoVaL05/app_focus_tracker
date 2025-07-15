@@ -1,7 +1,7 @@
 #ifndef FLUTTER_PLUGIN_APP_FOCUS_TRACKER_PLUGIN_C_API_H_
 #define FLUTTER_PLUGIN_APP_FOCUS_TRACKER_PLUGIN_C_API_H_
 
-#include <flutter_plugin_registrar.h>
+#include <flutter/plugin_registrar_windows.h>
 
 #ifdef __cplusplus
 extern "C" {
