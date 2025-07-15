@@ -1,10 +1,19 @@
 #ifndef FLUTTER_PLUGIN_APP_FOCUS_TRACKER_PLUGIN_C_API_H_
 #define FLUTTER_PLUGIN_APP_FOCUS_TRACKER_PLUGIN_C_API_H_
 
-#include <flutter/plugin_registrar_windows.h>
+#include <flutter_plugin_registrar.h>
 
 #ifdef __cplusplus
 extern "C" {
+#endif
+
+// Ensure FLUTTER_PLUGIN_EXPORT is defined
+#ifndef FLUTTER_PLUGIN_EXPORT
+#if defined(_WIN32)
+#define FLUTTER_PLUGIN_EXPORT __declspec(dllexport)
+#else
+#define FLUTTER_PLUGIN_EXPORT __attribute__((visibility("default")))
+#endif
 #endif
 
 FLUTTER_PLUGIN_EXPORT void AppFocusTrackerPluginRegisterWithRegistrar(
