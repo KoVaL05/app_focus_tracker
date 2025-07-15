@@ -6,5 +6,6 @@
 #define FLUTTER_PLUGIN_APP_FOCUS_TRACKER_PLUGIN_H_
 
 #include "../../app_focus_tracker_plugin.h"
+#include "app_focus_tracker_plugin_c_api.h"
 
 #endif // FLUTTER_PLUGIN_APP_FOCUS_TRACKER_PLUGIN_H_ 

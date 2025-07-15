@@ -7,7 +7,11 @@
 extern "C" {
 #endif
 
-void AppFocusTrackerPluginCApiRegisterWithRegistrar(
+FLUTTER_PLUGIN_EXPORT void AppFocusTrackerPluginRegisterWithRegistrar(
+    FlutterDesktopPluginRegistrarRef registrar);
+
+// Deprecated alias kept for backward compatibility. Will be removed in future major version.
+FLUTTER_PLUGIN_EXPORT void AppFocusTrackerPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar);
 
 #ifdef __cplusplus
