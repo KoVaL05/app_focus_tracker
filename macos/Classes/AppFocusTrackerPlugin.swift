@@ -30,6 +30,224 @@ private func browserType(for bundleId: String?) -> String {
     }
 }
 
+// MARK: - URL Extraction via AppleScript (macOS Browsers)
+
+/// Attempt to obtain the full URL of the front-most tab for common macOS browsers
+/// using AppleScript. Returns `nil` if the browser is not supported, the script
+/// fails, or the URL is empty.
+private func frontTabURL(for bundleId: String?) -> String? {
+    guard let bundleId = bundleId else { 
+        #if DEBUG
+        print("[DEBUG] frontTabURL: bundleId is nil")
+        #endif
+        return nil 
+    }
+
+    #if DEBUG
+    print("[DEBUG] frontTabURL: Processing bundleId: \(bundleId)")
+    #endif
+
+    // Map bundle identifier → AppleScript application name and script snippet
+    let mapping: [String: (appName: String, script: String)] = [
+        "com.google.Chrome":      ("Google Chrome", "return URL of active tab of front window"),
+        "com.microsoft.edgemac":  ("Microsoft Edge", "return URL of active tab of front window"),
+        "com.brave.Browser":      ("Brave Browser", "return URL of active tab of front window"),
+        // Safari's scripting interface is different
+        "com.apple.Safari":       ("Safari", "return URL of front document")
+    ]
+
+    guard let entry = mapping[bundleId] else { 
+        #if DEBUG
+        print("[DEBUG] frontTabURL: No AppleScript mapping found for bundleId: \(bundleId)")
+        #endif
+        return nil 
+    }
+
+    let source = """
+    tell application \"\(entry.appName)\"
+      try
+        if (count of windows) = 0 then return ""
+        \(entry.script)
+      on error errMsg number errNum
+        return "ERROR:" & errMsg & ":" & (errNum as string)
+      end try
+    end tell
+    """
+
+    #if DEBUG
+    print("[DEBUG] frontTabURL: Executing AppleScript for \(entry.appName)")
+    #endif
+
+    var errorInfo: NSDictionary?
+    if let script = NSAppleScript(source: source) {
+        let output = script.executeAndReturnError(&errorInfo)
+        
+        if let errorDict = errorInfo {
+            #if DEBUG
+            print("[DEBUG] frontTabURL: AppleScript error: \(errorDict)")
+            #endif
+            return nil
+        }
+        
+        if let urlString = output.stringValue, !urlString.isEmpty {
+            #if DEBUG
+            print("[DEBUG] frontTabURL: AppleScript returned: '\(urlString)'")
+            #endif
+            
+            // Check if it's an error message
+            if urlString.hasPrefix("ERROR:") {
+                #if DEBUG
+                print("[DEBUG] frontTabURL: AppleScript returned error: \(urlString)")
+                #endif
+                return nil
+            }
+            
+            if let base = sanitizeURL(urlString) { 
+                #if DEBUG
+                print("[DEBUG] frontTabURL: Sanitized URL: '\(base)'")
+                #endif
+                return base 
+            } else {
+                #if DEBUG
+                print("[DEBUG] frontTabURL: Failed to sanitize URL: '\(urlString)'")
+                #endif
+            }
+        } else {
+            #if DEBUG
+            print("[DEBUG] frontTabURL: AppleScript returned empty or nil string")
+            #endif
+        }
+    } else {
+        #if DEBUG
+        print("[DEBUG] frontTabURL: Failed to create NSAppleScript")
+        #endif
+    }
+
+    // Fallback: try Accessibility tree (AXWebArea -> AXURL)
+    #if DEBUG
+    print("[DEBUG] frontTabURL: Falling back to Accessibility API")
+    #endif
+    
+    if let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier {
+        if let axURL = urlFromAXTree(for: pid) {
+            #if DEBUG
+            print("[DEBUG] frontTabURL: Accessibility API returned: '\(axURL)'")
+            #endif
+            return axURL
+        } else {
+            #if DEBUG
+            print("[DEBUG] frontTabURL: Accessibility API returned nil")
+            #endif
+        }
+    } else {
+        #if DEBUG
+        print("[DEBUG] frontTabURL: Could not get frontmost application PID")
+        #endif
+    }
+
+    #if DEBUG
+    print("[DEBUG] frontTabURL: All methods failed, returning nil")
+    #endif
+    return nil
+}
+
+/// Reduce full URL to base origin
+private func sanitizeURL(_ urlString: String) -> String? {
+    if let parsed = URL(string: urlString), let host = parsed.host {
+        var base = ""
+        if let scheme = parsed.scheme { base = "\(scheme)://\(host)" } else { base = host }
+        if let port = parsed.port { base += ":\(port)" }
+        return base
+    }
+    if let range = urlString.range(of: "[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", options: .regularExpression) {
+        return "https://" + urlString[range]
+    }
+    return nil
+}
+
+/// Traverse Accessibility tree to find AXWebArea and fetch AXURL.
+private func urlFromAXTree(for pid: pid_t) -> String? {
+    #if DEBUG
+    print("[DEBUG] urlFromAXTree: Starting traversal for PID: \(pid)")
+    #endif
+    
+    let appElement = AXUIElementCreateApplication(pid)
+    var window: CFTypeRef?
+    let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &window)
+    
+    guard result == .success, let win = window else { 
+        #if DEBUG
+        print("[DEBUG] urlFromAXTree: Failed to get focused window, result: \(result.rawValue)")
+        #endif
+        return nil 
+    }
+    
+    #if DEBUG
+    print("[DEBUG] urlFromAXTree: Successfully got focused window, starting traversal")
+    #endif
+    
+    if let urlString = traverseForAXURL(element: win as! AXUIElement) {
+        #if DEBUG
+        print("[DEBUG] urlFromAXTree: Found URL in AX tree: '\(urlString)'")
+        #endif
+        return sanitizeURL(urlString)
+    } else {
+        #if DEBUG
+        print("[DEBUG] urlFromAXTree: No URL found in AX tree")
+        #endif
+    }
+    return nil
+}
+
+private func traverseForAXURL(element: AXUIElement) -> String? {
+    // Check if element is AXWebArea and has AXURL
+    var role: CFTypeRef?
+    if AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role) == .success,
+       let roleStr = role as? String {
+        
+        #if DEBUG
+        // Only log web areas to reduce noise
+        if roleStr == "AXWebArea" {
+            print("[DEBUG] traverseForAXURL: Found AXWebArea element")
+        }
+        #endif
+        
+        if roleStr == "AXWebArea" {
+            var urlVal: CFTypeRef?
+            if AXUIElementCopyAttributeValue(element, kAXURLAttribute as CFString, &urlVal) == .success,
+               let urlStr = urlVal as? String, !urlStr.isEmpty {
+                #if DEBUG
+                print("[DEBUG] traverseForAXURL: AXWebArea has AXURL: '\(urlStr)'")
+                #endif
+                return urlStr
+            } else {
+                #if DEBUG
+                print("[DEBUG] traverseForAXURL: AXWebArea found but no AXURL attribute")
+                #endif
+            }
+        }
+    }
+
+    // Recurse into children
+    var children: CFTypeRef?
+    if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children) == .success,
+       let arr = children as? [AXUIElement] {
+        
+        #if DEBUG
+        // Only log if we have a reasonable number of children to avoid spam
+        if arr.count > 0 && arr.count < 20 {
+            print("[DEBUG] traverseForAXURL: Examining \(arr.count) child elements")
+        }
+        #endif
+        
+        for child in arr {
+            if let found = traverseForAXURL(element: child) { 
+                return found 
+            }
+        }
+    }
+    return nil
+}
 // Retrieve the window title of the focused window for a given app
 private func windowTitle(for app: NSRunningApplication) -> String? {
     let axApp = AXUIElementCreateApplication(app.processIdentifier)
@@ -82,6 +300,108 @@ private func extractDomain(from title: String) -> String? {
     return nil
 }
 
+// MARK: - Focus Tracker Configuration
+
+private struct FocusTrackerConfig {
+    let updateIntervalMs: Int
+    let includeMetadata: Bool
+    let includeSystemApps: Bool
+    let enableBrowserTabTracking: Bool
+    let excludedApps: Set<String>
+    let includedApps: Set<String>
+    let enableBatching: Bool
+    let maxBatchSize: Int
+    let maxBatchWaitMs: Int
+    
+    static func fromJson(_ json: [String: Any]) -> FocusTrackerConfig {
+        return FocusTrackerConfig(
+            updateIntervalMs: json["updateIntervalMs"] as? Int ?? 1000,
+            includeMetadata: json["includeMetadata"] as? Bool ?? false,
+            includeSystemApps: json["includeSystemApps"] as? Bool ?? false,
+            enableBrowserTabTracking: json["enableBrowserTabTracking"] as? Bool ?? false,
+            excludedApps: Set((json["excludedApps"] as? [String]) ?? []),
+            includedApps: Set((json["includedApps"] as? [String]) ?? []),
+            enableBatching: json["enableBatching"] as? Bool ?? false,
+            maxBatchSize: json["maxBatchSize"] as? Int ?? 10,
+            maxBatchWaitMs: json["maxBatchWaitMs"] as? Int ?? 5000
+        )
+    }
+    
+    func toJson() -> [String: Any] {
+        return [
+            "updateIntervalMs": updateIntervalMs,
+            "includeMetadata": includeMetadata,
+            "includeSystemApps": includeSystemApps,
+            "enableBrowserTabTracking": enableBrowserTabTracking,
+            "excludedApps": Array(excludedApps),
+            "includedApps": Array(includedApps),
+            "enableBatching": enableBatching,
+            "maxBatchSize": maxBatchSize,
+            "maxBatchWaitMs": maxBatchWaitMs
+        ]
+    }
+}
+
+extension FocusTrackerConfig {
+    /// Convenience initializer used when only the `includeSystemApps` flag needs to be specified.
+    /// All other values are set to sensible defaults.
+    init(includeSystemApps: Bool) {
+        self.init(
+            updateIntervalMs: 1000,
+            includeMetadata: false,
+            includeSystemApps: includeSystemApps,
+            enableBrowserTabTracking: false,
+            excludedApps: [],
+            includedApps: [],
+            enableBatching: false,
+            maxBatchSize: 10,
+            maxBatchWaitMs: 5000
+        )
+    }
+}
+
+// MARK: - Browser Tab Info Model
+
+private struct BrowserTabInfo {
+    let domain: String?
+    let url: String?
+    let title: String
+    let browserType: String
+    
+    init(domain: String?, url: String?, title: String, browserType: String) {
+        self.domain = domain
+        self.url = url
+        self.title = title
+        self.browserType = browserType
+    }
+    
+    static func fromJson(_ json: [String: Any]) -> BrowserTabInfo? {
+        guard let title = json["title"] as? String,
+              let browserType = json["browserType"] as? String else {
+            return nil
+        }
+        
+        return BrowserTabInfo(
+            domain: json["domain"] as? String,
+            url: json["url"] as? String,
+            title: title,
+            browserType: browserType
+        )
+    }
+    
+    func toJson() -> [String: Any] {
+        var json: [String: Any] = [
+            "title": title,
+            "browserType": browserType
+        ]
+        
+        if let domain = domain { json["domain"] = domain }
+        if let url = url { json["url"] = url }
+        
+        return json
+    }
+}
+
 public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
     private var eventSink: FlutterEventSink?
     private var currentFocusedApp: AppInfo?
@@ -90,6 +410,10 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
     private var updateTimer: Timer?
     private var config: FocusTrackerConfig?
     private var sessionId: String?
+    
+    // Browser tab tracking
+    private var lastBrowserTabInfo: [String: Any]?
+    private var browserTabCheckTimer: Timer?
     
     // Event channel for streaming focus events
     private var eventChannel: FlutterEventChannel?
@@ -158,6 +482,9 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
             
         case "getDiagnosticInfo":
             getDiagnosticInfo(result: result)
+            
+        case "debugUrlExtraction":
+            debugUrlExtraction(result: result)
             
         default:
             result(FlutterMethodNotImplemented)
@@ -313,11 +640,19 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
         updateTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             self?.sendPeriodicUpdate()
         }
+        
+        // Start browser tab change detection if enabled
+        if config.includeMetadata && config.enableBrowserTabTracking {
+            startBrowserTabTracking()
+        }
     }
     
     private func stopPeriodicUpdates() {
         updateTimer?.invalidate()
         updateTimer = nil
+        
+        // Stop browser tab tracking
+        stopBrowserTabTracking()
     }
     
     @objc private func sendPeriodicUpdate() {
@@ -327,6 +662,117 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
         
         let duration = Date().timeIntervalSince(startTime)
         sendFocusEvent(for: currentApp, eventType: .durationUpdate, duration: duration)
+    }
+    
+    // MARK: - Browser Tab Change Detection
+    
+    private func startBrowserTabTracking() {
+        // Check for browser tab changes every 500ms when a browser is focused
+        browserTabCheckTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            self?.checkForBrowserTabChanges()
+        }
+    }
+    
+    private func stopBrowserTabTracking() {
+        browserTabCheckTimer?.invalidate()
+        browserTabCheckTimer = nil
+        lastBrowserTabInfo = nil
+    }
+    
+    private func checkForBrowserTabChanges() {
+        // Ensure we are actively tracking
+        guard isTracking else {
+            lastBrowserTabInfo = nil
+            return
+        }
+
+        // Re-evaluate the front-most application on every tick so that we
+        // capture tab title changes that occur without a full app focus
+        // change (e.g. switching tabs in the same browser window).
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
+            lastBrowserTabInfo = nil
+            return
+        }
+
+        // Build a fresh AppInfo snapshot for the current front-most app.
+        let currentApp = createAppInfo(from: frontmostApp)
+
+        // Only proceed if the focused application is a recognised browser.
+        guard currentApp.isBrowser else {
+            lastBrowserTabInfo = nil
+            return
+        }
+
+        // Get current browser tab info
+        guard let currentTabInfo = currentApp.browserTab else {
+            lastBrowserTabInfo = nil
+            return
+        }
+        
+        // Check if tab info has changed
+        if let lastTab = lastBrowserTabInfo {
+            let currentTab = currentTabInfo.toJson()
+            
+            // Compare tab information
+            if !tabsAreEqual(lastTab, currentTab) {
+                // Tab has changed, send tab change event
+                sendBrowserTabChangeEvent(
+                    for: currentApp,
+                    previousTab: lastTab,
+                    currentTab: currentTab
+                )
+                lastBrowserTabInfo = currentTab
+            }
+        } else {
+            // First time seeing this tab, just store it
+            lastBrowserTabInfo = currentTabInfo.toJson()
+        }
+    }
+    
+    private func tabsAreEqual(_ tab1: [String: Any], _ tab2: [String: Any]) -> Bool {
+        // Prefer comparing by domain (or url) because page titles can change
+        // frequently within the same tab (e.g., live-price updates) and we do
+        // not want to treat those as separate focus events.
+
+        if let d1 = tab1["domain"] as? String, !d1.isEmpty,
+           let d2 = tab2["domain"] as? String, !d2.isEmpty {
+            return d1 == d2
+        }
+
+        if let u1 = tab1["url"] as? String, !u1.isEmpty,
+           let u2 = tab2["url"] as? String, !u2.isEmpty {
+            return u1 == u2
+        }
+
+        // Fallback: if neither domain nor url exists, fall back to full title
+        // but strip dynamic parts like numbers to reduce false positives.
+        let sanitize: (String) -> String = { str in
+            // Remove all digits and commas/dots that typically vary in live titles
+            return str.replacingOccurrences(of: "[0-9.,]+", with: "", options: .regularExpression)
+                      .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        let title1 = sanitize(tab1["title"] as? String ?? "")
+        let title2 = sanitize(tab2["title"] as? String ?? "")
+        return title1 == title2
+    }
+    
+    private func sendBrowserTabChangeEvent(for app: AppInfo, previousTab: [String: Any], currentTab: [String: Any]) {
+        // Treat tab change as a focus switch within the same application.
+
+        // Send focus-lost event for the previous tab using the last known
+        // focused app metadata (if available).
+        if let startTime = focusStartTime {
+            let duration = Date().timeIntervalSince(startTime)
+            sendFocusEvent(for: currentFocusedApp ?? app, eventType: .lost, duration: duration)
+        }
+
+        // Update internal focus tracking to point at the new tab.
+        currentFocusedApp = app
+        focusStartTime = Date()
+
+        // Send focus-gained event for the newly selected tab.
+        sendFocusEvent(for: app, eventType: .gained, duration: 0)
     }
     
     private func sendCurrentFocusEvent() {
@@ -387,15 +833,27 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
         metadata["isBrowser"] = browserFlag
         if browserFlag, let wTitle = rawWindowTitle {
             let pageTitle = cleanedPageTitle(from: wTitle)
-            let domain = extractDomain(from: pageTitle)
+
+            // Try high-accuracy URL via AppleScript first
+            let fullURL = frontTabURL(for: app.bundleIdentifier)
+
+            // Derive domain
+            var derivedDomain: String? = nil
+            if let u = fullURL, let host = URL(string: u)?.host {
+                derivedDomain = host
+            } else {
+                derivedDomain = extractDomain(from: pageTitle)
+            }
+
+            // Build tab metadata
             var tabInfo: [String: Any] = [
                 "title": pageTitle,
                 "browserType": browserType(for: app.bundleIdentifier)
             ]
-            if let domain = domain {
-                tabInfo["domain"] = domain
-                tabInfo["url"] = "https://\(domain)"
-            }
+
+            if let url = fullURL { tabInfo["url"] = url }
+            if let d = derivedDomain { tabInfo["domain"] = d }
+
             metadata["browserTab"] = tabInfo
         }
 
@@ -503,6 +961,52 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
         result(diagnostics)
     }
     
+    private func debugUrlExtraction(result: @escaping FlutterResult) {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
+            result(["error": "No frontmost application"])
+            return
+        }
+        
+        var debugInfo: [String: Any] = [:]
+        
+        debugInfo["bundleIdentifier"] = frontmostApp.bundleIdentifier
+        debugInfo["processName"] = frontmostApp.localizedName
+        debugInfo["processId"] = frontmostApp.processIdentifier
+        
+        let isBrowser = isBrowserApp(frontmostApp)
+        debugInfo["isBrowser"] = isBrowser
+        
+        if isBrowser {
+            // Test AppleScript extraction
+            let applescriptUrl = frontTabURL(for: frontmostApp.bundleIdentifier)
+            debugInfo["applescriptUrl"] = applescriptUrl
+            
+            // Test Accessibility API extraction
+            let axUrl = urlFromAXTree(for: frontmostApp.processIdentifier)
+            debugInfo["accessibilityUrl"] = axUrl
+            
+            // Test window title extraction
+            if let windowTitle = windowTitle(for: frontmostApp) {
+                debugInfo["windowTitle"] = windowTitle
+                
+                let pageTitle = cleanedPageTitle(from: windowTitle)
+                let extractedDomain = extractDomain(from: pageTitle)
+                
+                debugInfo["titleExtraction"] = [
+                    "rawTitle": windowTitle,
+                    "cleanedTitle": pageTitle,
+                    "extractedDomain": extractedDomain,
+                    "browserType": browserType(for: frontmostApp.bundleIdentifier)
+                ]
+            } else {
+                debugInfo["windowTitle"] = nil
+                debugInfo["titleExtraction"] = ["error": "Could not get window title"]
+            }
+        }
+        
+        result(debugInfo)
+    }
+    
     // MARK: - Helper Methods
     
     private func parseFocusTrackerConfig(_ data: [String: Any]) -> FocusTrackerConfig {
@@ -538,6 +1042,15 @@ private struct AppInfo {
     let iconPath: String?
     let executablePath: String?
     let metadata: [String: Any]?
+    
+    var isBrowser: Bool {
+        return (metadata?["isBrowser"] as? Bool) ?? false
+    }
+    
+    var browserTab: BrowserTabInfo? {
+        guard let tabData = metadata?["browserTab"] as? [String: Any] else { return nil }
+        return BrowserTabInfo.fromJson(tabData)
+    }
     
     func toJson() -> [String: Any] {
         var json: [String: Any] = [
@@ -587,50 +1100,4 @@ private enum FocusEventType: String {
     case gained = "gained"
     case lost = "lost"
     case durationUpdate = "durationUpdate"
-}
-
-private struct FocusTrackerConfig {
-    let updateIntervalMs: Int
-    let includeMetadata: Bool
-    let includeSystemApps: Bool
-    let excludedApps: Set<String>
-    let includedApps: Set<String>
-    
-    init(updateIntervalMs: Int = 1000,
-         includeMetadata: Bool = false,
-         includeSystemApps: Bool = false,
-         excludedApps: Set<String> = [],
-         includedApps: Set<String> = []) {
-        self.updateIntervalMs = updateIntervalMs
-        self.includeMetadata = includeMetadata
-        self.includeSystemApps = includeSystemApps
-        self.excludedApps = excludedApps
-        self.includedApps = includedApps
-    }
-    
-    static func fromJson(_ data: [String: Any]) -> FocusTrackerConfig {
-        let updateIntervalMs = data["updateIntervalMs"] as? Int ?? 1000
-        let includeMetadata = data["includeMetadata"] as? Bool ?? false
-        let includeSystemApps = data["includeSystemApps"] as? Bool ?? false
-        let excludedApps = Set((data["excludedApps"] as? [String]) ?? [])
-        let includedApps = Set((data["includedApps"] as? [String]) ?? [])
-        
-        return FocusTrackerConfig(
-            updateIntervalMs: updateIntervalMs,
-            includeMetadata: includeMetadata,
-            includeSystemApps: includeSystemApps,
-            excludedApps: excludedApps,
-            includedApps: includedApps
-        )
-    }
-    
-    func toJson() -> [String: Any] {
-        return [
-            "updateIntervalMs": updateIntervalMs,
-            "includeMetadata": includeMetadata,
-            "includeSystemApps": includeSystemApps,
-            "excludedApps": Array(excludedApps),
-            "includedApps": Array(includedApps)
-        ]
-    }
 }

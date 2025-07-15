@@ -1,3 +1,32 @@
+## 0.0.3
+
+### New Features
+
+**Browser Tab Change Detection:**
+- Added `enableBrowserTabTracking` configuration option to enable/disable browser tab change detection
+- When enabled, browser tab changes within the same browser are treated as regular focus events (gained/lost)
+- Real-time browser tab change detection on both macOS and Windows platforms
+- Automatic browser tab information extraction and comparison for change detection
+
+**Configuration Enhancements:**
+- Added `enableBrowserTabTracking` field to `FocusTrackerConfig`
+- Browser tab tracking requires both `includeMetadata: true` and `enableBrowserTabTracking: true`
+- Default `FocusTrackerConfig.detailed()` now enables browser tab tracking by default
+- Simplified approach: tab changes emit regular focus events instead of special event types
+
+**Platform Implementations:**
+- **macOS**: Added browser tab change detection using Accessibility API with 500ms polling interval
+- **Windows**: Added browser tab change detection using Win32 API with 500ms polling interval
+- Both platforms now track browser tab information changes and emit regular focus events when tabs change
+
+### Testing and Maintenance
+
+- Fixed all test failures in `/test` directory
+- Updated mock platform implementations to include `debugUrlExtraction` and `getDiagnosticInfo` methods
+- Updated tests to use static `AppFocusTracker.getDiagnosticInfo()` as required by the API
+- Ensured all platform interface requirements are satisfied in all test mocks and local overrides
+- All tests now pass successfully
+
 ## 0.0.2
 
 ### Bug Fixes

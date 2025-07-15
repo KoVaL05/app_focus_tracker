@@ -102,7 +102,7 @@ void main() {
         // Diagnostic queries
         futures.add(Future(() async {
           for (int i = 0; i < 50; i++) {
-            await tracker.getDiagnosticInfo();
+            await AppFocusTracker.getDiagnosticInfo();
             await Future.delayed(const Duration(milliseconds: 10));
           }
         }));
@@ -117,7 +117,7 @@ void main() {
         expect(stopwatch.elapsedMilliseconds, lessThan(10000)); // Should complete within 10 seconds
 
         // System should remain responsive
-        final finalDiagnostics = await tracker.getDiagnosticInfo();
+        final finalDiagnostics = await AppFocusTracker.getDiagnosticInfo();
         expect(finalDiagnostics['isTracking'], isTrue);
       });
     });
@@ -192,7 +192,7 @@ void main() {
         await tracker.startTracking();
         expect(await tracker.isTracking(), isTrue);
 
-        final diagnostics = await tracker.getDiagnosticInfo();
+        final diagnostics = await AppFocusTracker.getDiagnosticInfo();
         expect(diagnostics['isTracking'], isTrue);
 
         await tracker.stopTracking();
@@ -337,7 +337,7 @@ void main() {
         }
 
         // System should still be responsive
-        final finalDiagnostics = await tracker.getDiagnosticInfo();
+        final finalDiagnostics = await AppFocusTracker.getDiagnosticInfo();
         expect(finalDiagnostics['isTracking'], isTrue);
       });
     });
@@ -414,7 +414,7 @@ void main() {
         expect(newEvents.length, equals(25));
 
         // Should be able to get diagnostics after reconnection
-        final diagnostics = await tracker.getDiagnosticInfo();
+        final diagnostics = await AppFocusTracker.getDiagnosticInfo();
         expect(diagnostics['isTracking'], isTrue);
       });
     });

@@ -385,26 +385,54 @@ class MethodChannelAppFocusTracker extends AppFocusTrackerPlatform {
     return _withRetry('getDiagnosticInfo', () async {
       try {
         final result = await methodChannel.invokeMethod('getDiagnosticInfo');
-        final diagnosticMap = safeMapConversion(result) ?? <String, dynamic>{};
-        return {
-          ...diagnosticMap,
-          'dartSide': {
-            'isTracking': _isTracking,
-            'currentConfig': _currentConfig?.toJson(),
-            'sessionId': _currentSessionId,
-            'sessionStartTime': _sessionStartTime?.toIso8601String(),
-            'degradedMode': _degradedMode,
-            'retryCount': _retryCount,
-            'errorCount': _errorCount,
-            'errorCounts': Map.from(_errorCounts),
-            'lastSuccessfulOperation': _lastSuccessfulOperation?.toIso8601String(),
-          },
-          'streamManager': _streamManager?.getDiagnosticInfo(),
-        };
+        final diagnostics = safeMapConversion(result);
+        if (diagnostics == null) {
+          throw const PlatformChannelException(
+            'Invalid diagnostic data format',
+            channelName: 'getDiagnosticInfo',
+          );
+        }
+        return diagnostics;
       } on PlatformException catch (e) {
         throw PlatformChannelException(
           'Failed to get diagnostic info: ${e.message}',
           channelName: 'getDiagnosticInfo',
+          platformDetails: {'code': e.code, 'details': e.details},
+          cause: e,
+        );
+      }
+    });
+  }
+
+  /// Debug method to test URL extraction on the currently focused browser.
+  ///
+  /// This method provides detailed information about URL extraction attempts
+  /// and can help identify why URLs might be showing as "unknown".
+  ///
+  /// Returns a map containing:
+  /// - Platform-specific extraction results (AppleScript, UIAutomation, etc.)
+  /// - Window title information
+  /// - Browser detection results
+  /// - Extracted domain/URL information
+  /// - Any error messages from the extraction process
+  ///
+  /// This method is intended for debugging purposes only.
+  Future<Map<String, dynamic>> debugUrlExtraction() async {
+    return _withRetry('debugUrlExtraction', () async {
+      try {
+        final result = await methodChannel.invokeMethod('debugUrlExtraction');
+        final debugInfo = safeMapConversion(result);
+        if (debugInfo == null) {
+          throw const PlatformChannelException(
+            'Invalid debug data format',
+            channelName: 'debugUrlExtraction',
+          );
+        }
+        return debugInfo;
+      } on PlatformException catch (e) {
+        throw PlatformChannelException(
+          'Failed to debug URL extraction: ${e.message}',
+          channelName: 'debugUrlExtraction',
           platformDetails: {'code': e.code, 'details': e.details},
           cause: e,
         );

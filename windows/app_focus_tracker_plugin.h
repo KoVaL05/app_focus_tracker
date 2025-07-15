@@ -47,6 +47,10 @@ private:
     
     // Background thread for periodic updates
     std::thread update_timer_;
+    
+    // Browser tab tracking
+    std::map<std::string, std::string> last_browser_tab_info_;
+    std::thread browser_tab_check_timer_;
 
     // Core tracking methods
     void StartTracking();
@@ -54,6 +58,12 @@ private:
     void SendCurrentFocusEvent();
     void SendPeriodicUpdate();
     void SendFocusEvent(const AppInfo& app_info, const std::string& event_type, int64_t duration_microseconds);
+    
+    // Browser tab change detection
+    void StartBrowserTabTracking();
+    void StopBrowserTabTracking();
+    void CheckForBrowserTabChanges();
+    void SendBrowserTabChangeEvent(const AppInfo& app_info, const std::string& previous_tab_info, const std::string& current_tab_info);
     
     // App information methods
     AppInfo CreateAppInfo(HWND hwnd);

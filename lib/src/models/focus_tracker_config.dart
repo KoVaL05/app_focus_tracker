@@ -35,6 +35,11 @@ class FocusTrackerConfig {
   /// Only applies when enableBatching is true
   final int maxBatchWaitMs;
 
+  /// Whether to track browser tab changes as focus events
+  /// When true, changing tabs within a browser will trigger focus events
+  /// Requires includeMetadata to be true
+  final bool enableBrowserTabTracking;
+
   /// Creates a new [FocusTrackerConfig] instance.
   const FocusTrackerConfig({
     this.updateIntervalMs = 1000,
@@ -45,6 +50,7 @@ class FocusTrackerConfig {
     this.enableBatching = false,
     this.maxBatchSize = 10,
     this.maxBatchWaitMs = 5000,
+    this.enableBrowserTabTracking = false,
   });
 
   /// Creates a default configuration for optimal performance.
@@ -66,6 +72,7 @@ class FocusTrackerConfig {
       includeMetadata: true,
       includeSystemApps: true,
       enableBatching: false,
+      enableBrowserTabTracking: true,
     );
   }
 
@@ -97,6 +104,7 @@ class FocusTrackerConfig {
       enableBatching: json['enableBatching'] as bool? ?? false,
       maxBatchSize: json['maxBatchSize'] as int? ?? 10,
       maxBatchWaitMs: json['maxBatchWaitMs'] as int? ?? 5000,
+      enableBrowserTabTracking: json['enableBrowserTabTracking'] as bool? ?? false,
     );
   }
 
@@ -111,6 +119,7 @@ class FocusTrackerConfig {
       'enableBatching': enableBatching,
       'maxBatchSize': maxBatchSize,
       'maxBatchWaitMs': maxBatchWaitMs,
+      'enableBrowserTabTracking': enableBrowserTabTracking,
     };
   }
 
@@ -124,6 +133,7 @@ class FocusTrackerConfig {
     bool? enableBatching,
     int? maxBatchSize,
     int? maxBatchWaitMs,
+    bool? enableBrowserTabTracking,
   }) {
     return FocusTrackerConfig(
       updateIntervalMs: updateIntervalMs ?? this.updateIntervalMs,
@@ -134,6 +144,7 @@ class FocusTrackerConfig {
       enableBatching: enableBatching ?? this.enableBatching,
       maxBatchSize: maxBatchSize ?? this.maxBatchSize,
       maxBatchWaitMs: maxBatchWaitMs ?? this.maxBatchWaitMs,
+      enableBrowserTabTracking: enableBrowserTabTracking ?? this.enableBrowserTabTracking,
     );
   }
 
@@ -148,7 +159,8 @@ class FocusTrackerConfig {
         includedApps == other.includedApps &&
         enableBatching == other.enableBatching &&
         maxBatchSize == other.maxBatchSize &&
-        maxBatchWaitMs == other.maxBatchWaitMs;
+        maxBatchWaitMs == other.maxBatchWaitMs &&
+        enableBrowserTabTracking == other.enableBrowserTabTracking;
   }
 
   @override
@@ -162,6 +174,7 @@ class FocusTrackerConfig {
       enableBatching,
       maxBatchSize,
       maxBatchWaitMs,
+      enableBrowserTabTracking,
     );
   }
 
@@ -169,6 +182,6 @@ class FocusTrackerConfig {
   String toString() {
     return 'FocusTrackerConfig(updateIntervalMs: $updateIntervalMs, '
         'includeMetadata: $includeMetadata, includeSystemApps: $includeSystemApps, '
-        'enableBatching: $enableBatching)';
+        'enableBatching: $enableBatching, enableBrowserTabTracking: $enableBrowserTabTracking)';
   }
 }

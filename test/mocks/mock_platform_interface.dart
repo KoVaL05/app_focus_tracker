@@ -248,6 +248,24 @@ class MockAppFocusTrackerPlatform extends AppFocusTrackerPlatform {
     return diagnostics;
   }
 
+  @override
+  Future<Map<String, dynamic>> debugUrlExtraction() async {
+    await _simulateDelay();
+    _throwIfSimulatingErrors('debugUrlExtraction');
+    return {
+      'platform': platformName,
+      'windowTitle': 'Mock Browser Window - Test Page',
+      'browserDetected': 'MockBrowser',
+      'extractedUrl': 'https://example.com/test',
+      'extractedDomain': 'example.com',
+      'uiAutomationUrl': 'https://example.com/test',
+      'applescriptUrl': 'https://example.com/test',
+      'errorMessages': [],
+      'extractionMethods': ['mock', 'simulated'],
+      'timestamp': DateTime.now().toIso8601String(),
+    };
+  }
+
   // Mock-specific methods for testing
 
   /// Simulates an app gaining focus

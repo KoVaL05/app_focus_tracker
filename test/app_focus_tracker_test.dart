@@ -41,6 +41,9 @@ class MockAppFocusTrackerPlatform with MockPlatformInterfaceMixin implements App
   Future<Map<String, dynamic>> getDiagnosticInfo() => Future.value({});
 
   @override
+  Future<Map<String, dynamic>> debugUrlExtraction() => Future.value({});
+
+  @override
   Future<void> openSystemSettings() => Future.value();
 }
 

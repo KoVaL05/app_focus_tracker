@@ -393,4 +393,41 @@ void main() {
       });
     });
   });
+
+  group('Browser Tab Detection', () {
+    test('should identify browser events correctly', () {
+      final event = FocusEvent(
+        appName: 'Google Chrome',
+        eventType: FocusEventType.gained,
+        durationMicroseconds: 0,
+        metadata: {
+          'isBrowser': true,
+          'browserTab': {
+            'domain': 'example.com',
+            'url': 'https://example.com',
+            'title': 'Example Page',
+            'browserType': 'chrome',
+          },
+        },
+      );
+
+      expect(event.isBrowser, isTrue);
+      expect(event.browserTab, isNotNull);
+      expect(event.browserTab!.domain, equals('example.com'));
+    });
+
+    test('should handle non-browser events correctly', () {
+      final event = FocusEvent(
+        appName: 'TextEdit',
+        eventType: FocusEventType.gained,
+        durationMicroseconds: 0,
+        metadata: {
+          'isBrowser': false,
+        },
+      );
+
+      expect(event.isBrowser, isFalse);
+      expect(event.browserTab, isNull);
+    });
+  });
 }

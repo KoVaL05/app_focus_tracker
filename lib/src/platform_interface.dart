@@ -155,12 +155,34 @@ abstract class AppFocusTrackerPlatform extends PlatformInterface {
     throw UnimplementedError('updateConfiguration() has not been implemented.');
   }
 
-  /// Gets diagnostic information about the current state of the tracker.
+  /// Retrieves diagnostic information about the plugin's current state.
   ///
-  /// This includes information like tracking status, configuration,
-  /// platform-specific details, and performance metrics.
-  /// Useful for debugging and monitoring.
+  /// Returns comprehensive information about:
+  /// - Platform capabilities and permissions
+  /// - Current tracking state and configuration
+  /// - Performance metrics and error counts
+  /// - System information
+  ///
+  /// This is useful for debugging issues and monitoring plugin health.
   Future<Map<String, dynamic>> getDiagnosticInfo() {
     throw UnimplementedError('getDiagnosticInfo() has not been implemented.');
+  }
+
+  /// Debug method to test URL extraction on the currently focused browser.
+  ///
+  /// This method provides detailed information about URL extraction attempts
+  /// and can help identify why URLs might be showing as "unknown".
+  ///
+  /// Returns a map containing:
+  /// - Platform-specific extraction results (AppleScript, UIAutomation, etc.)
+  /// - Window title information
+  /// - Browser detection results
+  /// - Extracted domain/URL information
+  /// - Any error messages from the extraction process
+  ///
+  /// This method is intended for debugging purposes only and may not be
+  /// available on all platforms.
+  Future<Map<String, dynamic>> debugUrlExtraction() {
+    throw UnimplementedError('debugUrlExtraction() has not been implemented.');
   }
 }
