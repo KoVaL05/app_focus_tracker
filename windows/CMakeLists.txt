@@ -22,6 +22,7 @@ list(APPEND PLUGIN_SOURCES
 # on PLUGIN_NAME above).
 add_library(${PLUGIN_NAME} SHARED
   "include/app_focus_tracker/app_focus_tracker_plugin_c_api.h"
+  "include/app_focus_tracker/app_focus_tracker_plugin.h"
   "app_focus_tracker_plugin_c_api.cpp"
   ${PLUGIN_SOURCES}
 )
