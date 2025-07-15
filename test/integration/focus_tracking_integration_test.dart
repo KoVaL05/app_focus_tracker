@@ -307,8 +307,7 @@ void main() {
           if (durationUpdates.length > 1) {
             // Duration should generally increase in updates
             for (int i = 1; i < durationUpdates.length; i++) {
-              expect(durationUpdates[i].durationMicroseconds,
-                  greaterThanOrEqualTo(20000)); // At least 20ms
+              expect(durationUpdates[i].durationMicroseconds, greaterThanOrEqualTo(20000)); // At least 20ms
             }
           }
         }
@@ -463,7 +462,7 @@ void main() {
           final stream = tracker.focusStream;
           expect(stream, isA<Stream<FocusEvent>>());
 
-          final diagnostics = await tracker.getDiagnosticInfo();
+          final diagnostics = await AppFocusTracker.getDiagnosticInfo();
           expect(diagnostics, isA<Map<String, dynamic>>());
           expect(diagnostics.containsKey('platform'), isTrue);
 

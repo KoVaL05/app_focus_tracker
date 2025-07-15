@@ -8,6 +8,7 @@ A Flutter plugin for tracking application focus changes across macOS and Windows
 - **Real-Time Focus Tracking**: Stream-based API for live focus change events
 - **Application Information**: Detailed metadata about running applications
 - **Browser Tab Extraction**: Automatic detection and parsing of web browser tabs (domain, URL, title)
+- **Browser Tab Change Detection**: Track browser tab changes as regular focus events when tabs change within the same browser application
 - **Permission Management**: Automatic handling of platform-specific permissions
 - **Performance Optimized**: Efficient event handling with configurable update intervals
 - **Comprehensive Testing**: Extensive test suite covering unit, integration, and performance tests
@@ -70,6 +71,11 @@ void main() async {
           print('Title: ${tab.title}');
         }
       }
+      
+      // Check if it's a browser and extract tab information
+      if (event.isBrowser && event.browserTab != null) {
+        print('Browser tab: ${event.browserTab!.domain} - ${event.browserTab!.title}');
+      }
     });
     
     // Get current focused application
@@ -94,6 +100,8 @@ FocusTrackerConfig(
   includeSystemApps: false,     // Whether to include system applications
   enableDurationTracking: true, // Track how long apps stay in focus
   maxEventBufferSize: 1000,     // Maximum events to buffer
+  includeMetadata: true,        // Include detailed app metadata
+  enableBrowserTabTracking: true, // Track browser tab changes as focus events
 )
 ```
 
@@ -104,7 +112,8 @@ The plugin provides several types of focus events:
 - `FocusEventType.gained`: Application gained focus
 - `FocusEventType.lost`: Application lost focus  
 - `FocusEventType.durationUpdate`: Duration update for current app
-- `FocusEventType.switched`: Direct switch between applications
+
+**Note**: When browser tab tracking is enabled, tab changes within the same browser are treated as regular focus events (gained/lost).
 
 ## API Reference
 
@@ -132,6 +141,12 @@ class FocusEvent {
   final DateTime timestamp;
   final Duration? duration;
   final Map<String, dynamic>? metadata;
+  
+  /// Whether the focused application is a recognised web browser
+  bool get isBrowser;
+  
+  /// Parsed browser tab info when [isBrowser] is true
+  BrowserTabInfo? get browserTab;
 }
 ```
 
@@ -162,6 +177,91 @@ class BrowserTabInfo {
   final String title;        // Page title
   final String browserType;  // "chrome", "edge", "firefox", etc.
 }
+```
+
+## Browser Tab Tracking
+
+The plugin automatically detects when the focused application is a web browser and extracts information about the currently active tab, including:
+
+- **Domain**: The website's domain (e.g., `stackoverflow.com`)
+- **URL**: The full base URL (e.g., `https://stackoverflow.com`)
+- **Title**: The cleaned page title (without browser name suffix)
+- **Browser Type**: The browser being used (`chrome`, `firefox`, `safari`, etc.)
+
+### Platform-Specific Implementation
+
+**macOS:**
+- Primary: AppleScript integration for direct URL access
+- Fallback: Accessibility API (AXWebArea → AXURL)
+- Last resort: Window title parsing
+
+**Windows:**
+- Primary: UIAutomation API for address bar access
+- Fallback: Window title parsing with enhanced regex patterns
+
+### Troubleshooting URL Extraction
+
+If you're seeing "unknown" domains or missing URLs, use the debug method to identify the issue:
+
+```dart
+// Debug URL extraction for the currently focused browser
+final debugInfo = await AppFocusTracker.debugUrlExtraction();
+print('Debug Info: $debugInfo');
+```
+
+#### Common Issues and Solutions
+
+**1. Browser Security Restrictions**
+- **Chrome/Edge**: May block UIAutomation access to address bar
+- **Solution**: Check if the browser has security policies blocking automation
+- **Workaround**: Rely on window title parsing when automation fails
+
+**2. Missing Permissions**
+- **macOS**: AppleScript may be disabled by system policies
+- **Windows**: UIAutomation requires appropriate process privileges
+- **Solution**: Ensure all accessibility permissions are granted
+
+**3. Browser-Specific Issues**
+- **Firefox**: Limited automation support, relies heavily on title parsing
+- **Safari**: Different AppleScript interface than other browsers
+- **Solution**: Update browser detection patterns or use alternative extraction methods
+
+**4. Window Title Doesn't Contain Domain**
+- Some sites don't include domain in page titles
+- **Solution**: Use primary extraction methods (AppleScript/UIAutomation) when available
+
+#### Debug Output Example
+
+```dart
+{
+  'isBrowser': true,
+  'windowTitle': 'Stack Overflow - Where Developers Learn, Share, & Build Careers',
+  'applescriptUrl': 'https://stackoverflow.com',  // macOS only
+  'uiAutomationUrl': 'https://stackoverflow.com', // Windows only
+  'titleExtraction': {
+    'domain': 'stackoverflow.com',
+    'url': 'https://stackoverflow.com',
+    'valid': true
+  }
+}
+```
+
+#### Enabling Debug Logging
+
+For detailed debugging information during development:
+
+**Windows (Debug Build):**
+```cpp
+// Add to preprocessor definitions
+#define _DEBUG
+```
+
+**macOS (Debug Build):**
+```swift
+// Debug output automatically enabled in DEBUG builds
+#if DEBUG
+print("[DEBUG] URL extraction details...")
+#endif
 ```
 
 ## Platform-Specific Features

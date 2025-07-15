@@ -360,4 +360,70 @@ void main() {
       });
     });
   });
+
+  group('Browser Tab Tracking Configuration', () {
+    test('should have correct default value for enableBrowserTabTracking', () {
+      const config = FocusTrackerConfig();
+      expect(config.enableBrowserTabTracking, isFalse);
+    });
+
+    test('should enable browser tab tracking in detailed configuration', () {
+      final config = FocusTrackerConfig.detailed();
+      expect(config.enableBrowserTabTracking, isTrue);
+    });
+
+    test('should serialize and deserialize enableBrowserTabTracking correctly', () {
+      const config = FocusTrackerConfig(
+        enableBrowserTabTracking: true,
+        includeMetadata: true,
+      );
+
+      final json = config.toJson();
+      expect(json['enableBrowserTabTracking'], isTrue);
+
+      final deserialized = FocusTrackerConfig.fromJson(json);
+      expect(deserialized.enableBrowserTabTracking, isTrue);
+    });
+
+    test('should handle missing enableBrowserTabTracking in JSON', () {
+      final json = {
+        'updateIntervalMs': 1000,
+        'includeMetadata': true,
+      };
+
+      final config = FocusTrackerConfig.fromJson(json);
+      expect(config.enableBrowserTabTracking, isFalse);
+    });
+
+    test('should copy with enableBrowserTabTracking correctly', () {
+      const original = FocusTrackerConfig(enableBrowserTabTracking: false);
+      final copied = original.copyWith(enableBrowserTabTracking: true);
+
+      expect(copied.enableBrowserTabTracking, isTrue);
+      expect(original.enableBrowserTabTracking, isFalse);
+    });
+
+    test('should include enableBrowserTabTracking in equality comparison', () {
+      const config1 = FocusTrackerConfig(enableBrowserTabTracking: true);
+      const config2 = FocusTrackerConfig(enableBrowserTabTracking: false);
+      const config3 = FocusTrackerConfig(enableBrowserTabTracking: true);
+
+      expect(config1, equals(config3));
+      expect(config1, isNot(equals(config2)));
+    });
+
+    test('should include enableBrowserTabTracking in hashCode', () {
+      const config1 = FocusTrackerConfig(enableBrowserTabTracking: true);
+      const config2 = FocusTrackerConfig(enableBrowserTabTracking: false);
+
+      expect(config1.hashCode, isNot(equals(config2.hashCode)));
+    });
+
+    test('should include enableBrowserTabTracking in toString', () {
+      const config = FocusTrackerConfig(enableBrowserTabTracking: true);
+      final string = config.toString();
+
+      expect(string, contains('enableBrowserTabTracking: true'));
+    });
+  });
 }

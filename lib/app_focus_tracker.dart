@@ -167,14 +167,34 @@ class AppFocusTracker {
 
   /// Gets diagnostic information about the current state of the tracker.
   ///
-  /// Returns a map containing:
-  /// - Tracking status and configuration
-  /// - Platform-specific details and capabilities
-  /// - Performance metrics and resource usage
-  /// - Error information if applicable
+  /// This includes information like tracking status, configuration,
+  /// platform-specific details, and performance metrics.
+  /// Useful for debugging and monitoring.
+  static Future<Map<String, dynamic>> getDiagnosticInfo() async {
+    return AppFocusTrackerPlatform.instance.getDiagnosticInfo();
+  }
+
+  /// Debug method to test URL extraction on the currently focused browser.
   ///
-  /// This is useful for debugging, monitoring, and health checks.
-  Future<Map<String, dynamic>> getDiagnosticInfo() => _platform.getDiagnosticInfo();
+  /// This method provides detailed information about URL extraction attempts
+  /// and can help identify why URLs might be showing as "unknown".
+  ///
+  /// Returns a map containing platform-specific extraction results, window
+  /// title information, browser detection results, extracted domain/URL
+  /// information, and any error messages from the extraction process.
+  ///
+  /// Example usage:
+  /// ```dart
+  /// final debugInfo = await AppFocusTracker.debugUrlExtraction();
+  /// print('UIAutomation URL: ${debugInfo['uiAutomationUrl']}');
+  /// print('AppleScript URL: ${debugInfo['applescriptUrl']}');
+  /// print('Window Title: ${debugInfo['windowTitle']}');
+  /// ```
+  ///
+  /// This method is intended for debugging purposes only.
+  static Future<Map<String, dynamic>> debugUrlExtraction() async {
+    return AppFocusTrackerPlatform.instance.debugUrlExtraction();
+  }
 
   /// Convenience method to start tracking with performance-optimized settings.
   ///

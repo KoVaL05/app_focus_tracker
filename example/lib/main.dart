@@ -132,11 +132,12 @@ class _MyAppState extends State<MyApp> {
     }
 
     try {
-      // Configure for detailed tracking with real-time updates
+      // Configure for detailed tracking with real-time updates and browser tab tracking
       final config = FocusTrackerConfig.detailed().copyWith(
         updateIntervalMs: 1000, // Update every second
         includeMetadata: true,
         includeSystemApps: false,
+        enableBrowserTabTracking: true, // Enable browser tab change detection
       );
 
       await _appFocusTracker.startTracking(config);
@@ -228,7 +229,7 @@ class _MyAppState extends State<MyApp> {
   // Show diagnostic information
   Future<void> _showDiagnostics() async {
     try {
-      final diagnostics = await _appFocusTracker.getDiagnosticInfo();
+      final diagnostics = await AppFocusTracker.getDiagnosticInfo();
 
       showDialog(
         context: context,
@@ -255,6 +256,171 @@ class _MyAppState extends State<MyApp> {
     } catch (e) {
       _showError('Failed to get diagnostics: $e');
     }
+  }
+
+  // Show URL extraction debug information
+  Future<void> _showUrlDebug() async {
+    try {
+      final debugInfo = await AppFocusTracker.debugUrlExtraction();
+
+      showDialog(
+        context: context,
+        barrierDismissible: false, // Prevent closing by tapping outside
+        builder: (context) => AlertDialog(
+          title: const Text('URL Extraction Debug'),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 400,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Debug Information:',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    debugInfo.entries.map((e) => '${e.key}: ${e.value}').join('\n'),
+                    style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Instructions:',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '1. Switch to a browser window (this dialog will stay open)\n'
+                    '2. Click "Refresh Debug Info" to capture the browser state\n'
+                    '3. Check the output above for URL extraction results\n'
+                    '4. Look for "unknown" or empty values to identify issues',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+            TextButton(
+              onPressed: () async {
+                // Close dialog and show refresh with delay
+                Navigator.of(context).pop();
+                _showUrlDebugWithDelay();
+              },
+              child: const Text('Refresh Debug Info'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      _showError('Failed to get URL debug info: $e');
+    }
+  }
+
+  // Show URL debug with a delay to allow user to switch to browser
+  void _showUrlDebugWithDelay() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Preparing Debug...'),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text(
+              'Please switch to a browser window now.\n'
+              'Debug info will be captured in 3 seconds.',
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    // Wait 3 seconds then capture debug info
+    Future.delayed(const Duration(seconds: 3), () async {
+      if (mounted) {
+        try {
+          final debugInfo = await AppFocusTracker.debugUrlExtraction();
+          Navigator.of(context).pop(); // Close the "preparing" dialog
+          _showUrlDebugWithData(debugInfo);
+        } catch (e) {
+          Navigator.of(context).pop(); // Close the "preparing" dialog
+          _showError('Failed to get debug info: $e');
+        }
+      }
+    });
+  }
+
+  // Helper method to show URL debug with specific data
+  void _showUrlDebugWithData(Map<String, dynamic> debugInfo) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('URL Extraction Debug'),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 400,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Debug Information:',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  debugInfo.entries.map((e) => '${e.key}: ${e.value}').join('\n'),
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Instructions:',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  '1. Switch to a browser window (this dialog will stay open)\n'
+                  '2. Click "Refresh Debug Info" to capture the browser state\n'
+                  '3. Check the output above for URL extraction results\n'
+                  '4. Look for "unknown" or empty values to identify issues',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+          TextButton(
+            onPressed: () async {
+              // Close dialog and show refresh with delay
+              Navigator.of(context).pop();
+              _showUrlDebugWithDelay();
+            },
+            child: const Text('Refresh Debug Info'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showError(String message) {
@@ -365,6 +531,12 @@ class _MyAppState extends State<MyApp> {
                   icon: const Icon(Icons.info),
                   label: const Text('Diagnostics'),
                 ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: _showUrlDebug,
+                  icon: const Icon(Icons.bug_report),
+                  label: const Text('URL Debug'),
+                ),
               ],
             ),
 
@@ -425,8 +597,29 @@ class _MyAppState extends State<MyApp> {
                                 style: const TextStyle(fontSize: 20),
                               ),
                               title: Text(event.appName),
-                              subtitle: Text(
-                                '${event.eventType.name} • ${_formatDuration(Duration(microseconds: event.durationMicroseconds))}',
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '${event.eventType.name} • ${_formatDuration(Duration(microseconds: event.durationMicroseconds))}',
+                                  ),
+                                  if (event.isBrowser && event.browserTab != null) ...[
+                                    Text(
+                                      '🌐 ${event.browserTab!.browserType} • ${event.browserTab!.url ?? "Unknown"}',
+                                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                            color: Colors.blue,
+                                          ),
+                                    ),
+                                    Text(
+                                      event.browserTab!.title,
+                                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                            fontStyle: FontStyle.italic,
+                                          ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ],
                               ),
                               trailing: Text(
                                 '${event.timestamp.hour.toString().padLeft(2, '0')}:'

@@ -18,6 +18,8 @@
 #include <iostream>
 #include <algorithm>
 #include <regex>
+#include <UIAutomation.h>
+#pragma comment(lib, "Oleacc.lib")
 
 namespace {
 
@@ -120,6 +122,201 @@ std::string GetFileVersion(const std::string& filePath) {
 
 } // namespace
 
+// ------------------- UIAutomation Helpers (Windows) --------------------
+
+// Extract host from a URL string (no path/query) – returns empty on failure
+static std::string HostFromUrl(const std::string& url) {
+    std::regex host_re(R"((?:https?://)?([^/]+))", std::regex::icase);
+    std::smatch m;
+    if (std::regex_search(url, m, host_re) && m.size() > 1) {
+        return m[1].str();
+    }
+    return "";
+}
+
+// Obtain the base URL (scheme://host[:port]) of the front-most tab in a browser
+// window using UIAutomation. Returns empty string if not available.
+static std::string GetBaseURLFromBrowserWindow(HWND hwnd) {
+    if (!hwnd) {
+        #ifdef _DEBUG
+        std::cout << "[DEBUG] GetBaseURLFromBrowserWindow: hwnd is null" << std::endl;
+        #endif
+        return "";
+    }
+
+    bool comInit = false;
+    HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    if (SUCCEEDED(hr)) {
+        comInit = true;
+    } else if (hr == RPC_E_CHANGED_MODE) {
+        // Already initialised in STA – carry on.
+        #ifdef _DEBUG
+        std::cout << "[DEBUG] GetBaseURLFromBrowserWindow: COM already initialized" << std::endl;
+        #endif
+    } else {
+        #ifdef _DEBUG
+        std::cout << "[DEBUG] GetBaseURLFromBrowserWindow: COM initialization failed: " << hr << std::endl;
+        #endif
+    }
+
+    std::string result;
+    int elementsFound = 0;
+    int elementsProcessed = 0;
+
+    IUIAutomation* automation = nullptr;
+    hr = CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&automation));
+    if (!SUCCEEDED(hr)) {
+        #ifdef _DEBUG
+        std::cout << "[DEBUG] GetBaseURLFromBrowserWindow: Failed to create UIAutomation instance: " << hr << std::endl;
+        #endif
+        if (comInit) CoUninitialize();
+        return "";
+    }
+
+    IUIAutomationElement* root = nullptr;
+    hr = automation->ElementFromHandle(hwnd, &root);
+    if (!SUCCEEDED(hr) || !root) {
+        #ifdef _DEBUG
+        std::cout << "[DEBUG] GetBaseURLFromBrowserWindow: Failed to get element from window handle: " << hr << std::endl;
+        #endif
+        automation->Release();
+        if (comInit) CoUninitialize();
+        return "";
+    }
+
+    // Build OR condition: ControlType == Edit OR ControlType == Document
+    VARIANT vEdit; vEdit.vt = VT_I4; vEdit.lVal = UIA_EditControlTypeId;
+    VARIANT vDoc;  vDoc.vt = VT_I4; vDoc.lVal = UIA_DocumentControlTypeId;
+    IUIAutomationCondition *condEdit = nullptr, *condDoc = nullptr, *orCond = nullptr;
+    
+    bool conditionsCreated = SUCCEEDED(automation->CreatePropertyCondition(UIA_ControlTypePropertyId, vEdit, &condEdit)) &&
+                           SUCCEEDED(automation->CreatePropertyCondition(UIA_ControlTypePropertyId, vDoc, &condDoc)) &&
+                           SUCCEEDED(automation->CreateOrCondition(condEdit, condDoc, &orCond));
+    
+    if (!conditionsCreated) {
+        #ifdef _DEBUG
+        std::cout << "[DEBUG] GetBaseURLFromBrowserWindow: Failed to create automation conditions" << std::endl;
+        #endif
+    } else {
+        IUIAutomationElementArray* elements = nullptr;
+        hr = root->FindAll(TreeScope_Subtree, orCond, &elements);
+        if (SUCCEEDED(hr) && elements) {
+            elements->get_Length(&elementsFound);
+            #ifdef _DEBUG
+            std::cout << "[DEBUG] GetBaseURLFromBrowserWindow: Found " << elementsFound << " elements" << std::endl;
+            #endif
+            
+            for (int i = 0; i < elementsFound; ++i) {
+                IUIAutomationElement* el = nullptr;
+                if (SUCCEEDED(elements->GetElement(i, &el)) && el) {
+                    elementsProcessed++;
+                    
+                    // Get element info for debugging
+                    #ifdef _DEBUG
+                    BSTR elementName = nullptr;
+                    if (SUCCEEDED(el->get_CurrentName(&elementName)) && elementName) {
+                        std::cout << "[DEBUG] Processing element " << i << ": " << WideToUtf8(elementName) << std::endl;
+                        SysFreeString(elementName);
+                    }
+                    #endif
+                    
+                    // Try ValuePattern first
+                    IUIAutomationValuePattern* vp = nullptr;
+                    if (SUCCEEDED(el->GetCurrentPattern(UIA_ValuePatternId, reinterpret_cast<IUnknown**>(&vp))) && vp) {
+                        BSTR bstr;
+                        if (SUCCEEDED(vp->get_CurrentValue(&bstr)) && bstr && SysStringLen(bstr) > 0) {
+                            std::wstring w(bstr, SysStringLen(bstr));
+                            std::string candidate = WideToUtf8(w);
+                            #ifdef _DEBUG
+                            std::cout << "[DEBUG] ValuePattern result: " << candidate << std::endl;
+                            #endif
+                            // Only accept if it looks like a URL
+                            if (candidate.find("http") == 0 || candidate.find("https") == 0 || 
+                                candidate.find("www.") != std::string::npos ||
+                                candidate.find(".com") != std::string::npos ||
+                                candidate.find(".org") != std::string::npos ||
+                                candidate.find(".net") != std::string::npos) {
+                                result = candidate;
+                                SysFreeString(bstr);
+                                vp->Release();
+                                el->Release();
+                                break;
+                            }
+                            SysFreeString(bstr);
+                        }
+                        vp->Release();
+                    }
+
+                    // Fallback to Name property if still empty
+                    if (result.empty()) {
+                        BSTR nameBstr;
+                        if (SUCCEEDED(el->get_CurrentName(&nameBstr)) && nameBstr && SysStringLen(nameBstr) > 0) {
+                            std::wstring w(nameBstr, SysStringLen(nameBstr));
+                            std::string candidate = WideToUtf8(w);
+                            #ifdef _DEBUG
+                            std::cout << "[DEBUG] Name property result: " << candidate << std::endl;
+                            #endif
+                            // Only accept if it looks like a URL
+                            if (candidate.find("http") == 0 || candidate.find("https") == 0 || 
+                                candidate.find("www.") != std::string::npos ||
+                                candidate.find(".com") != std::string::npos ||
+                                candidate.find(".org") != std::string::npos ||
+                                candidate.find(".net") != std::string::npos) {
+                                result = candidate;
+                                SysFreeString(nameBstr);
+                                el->Release();
+                                break;
+                            }
+                            SysFreeString(nameBstr);
+                        }
+                    }
+                    el->Release();
+                }
+            }
+            elements->Release();
+        } else {
+            #ifdef _DEBUG
+            std::cout << "[DEBUG] GetBaseURLFromBrowserWindow: FindAll failed or returned null: " << hr << std::endl;
+            #endif
+        }
+        
+        if (condEdit) condEdit->Release();
+        if (condDoc) condDoc->Release();
+        if (orCond) orCond->Release();
+    }
+    
+    root->Release();
+    automation->Release();
+
+    if (comInit) CoUninitialize();
+
+    #ifdef _DEBUG
+    std::cout << "[DEBUG] GetBaseURLFromBrowserWindow: Processed " << elementsProcessed << "/" << elementsFound 
+              << " elements, result: '" << result << "'" << std::endl;
+    #endif
+
+    // Reduce to base origin (scheme://host[:port])
+    if (!result.empty()) {
+        std::regex full_re(R"(^([a-zA-Z][a-zA-Z0-9+.-]*://)?([^/]+))");
+        std::smatch m;
+        if (std::regex_search(result, m, full_re) && m.size() > 2) {
+            std::string scheme = m[1].str();
+            std::string host = m[2].str();
+            if (scheme.empty()) scheme = "https://";
+            std::string baseUrl = scheme + host; // no trailing slash
+            #ifdef _DEBUG
+            std::cout << "[DEBUG] GetBaseURLFromBrowserWindow: Final base URL: " << baseUrl << std::endl;
+            #endif
+            return baseUrl;
+        } else {
+            #ifdef _DEBUG
+            std::cout << "[DEBUG] GetBaseURLFromBrowserWindow: Regex failed to match URL pattern" << std::endl;
+            #endif
+        }
+    }
+    return "";
+}
+// ------------------- end helpers --------------------
 // Add helper structures and functions for browser tab extraction
 // Browser tab information structure
 struct BrowserTabInfo {
@@ -162,6 +359,11 @@ static BrowserTabInfo ExtractBrowserTabInfo(const std::string& window_title,
                                             const std::string& process_name) {
     BrowserTabInfo info;
 
+    #ifdef _DEBUG
+    std::cout << "[DEBUG] ExtractBrowserTabInfo: Processing window_title='" << window_title 
+              << "', process_name='" << process_name << "'" << std::endl;
+    #endif
+
     std::string proc_lower = process_name;
     std::transform(proc_lower.begin(), proc_lower.end(), proc_lower.begin(), ::tolower);
     if (proc_lower.find("chrome") != std::string::npos) {
@@ -180,6 +382,10 @@ static BrowserTabInfo ExtractBrowserTabInfo(const std::string& window_title,
         info.browserType = "browser";
     }
 
+    #ifdef _DEBUG
+    std::cout << "[DEBUG] ExtractBrowserTabInfo: Detected browser type: " << info.browserType << std::endl;
+    #endif
+
     // Common patterns: "<page title> - <Browser Name>" or vice-versa.
     // We capture everything before the last hyphen as title if the suffix matches a browser name.
     std::regex pattern(R"((.+?)\s*-\s*(Google Chrome|Microsoft Edge|Brave|Mozilla Firefox|Opera|Safari))",
@@ -188,6 +394,13 @@ static BrowserTabInfo ExtractBrowserTabInfo(const std::string& window_title,
     std::string page_title = window_title;
     if (std::regex_match(window_title, match, pattern) && match.size() > 1) {
         page_title = match[1].str();
+        #ifdef _DEBUG
+        std::cout << "[DEBUG] ExtractBrowserTabInfo: Extracted page title from pattern: '" << page_title << "'" << std::endl;
+        #endif
+    } else {
+        #ifdef _DEBUG
+        std::cout << "[DEBUG] ExtractBrowserTabInfo: No browser pattern matched, using full title" << std::endl;
+        #endif
     }
     info.title = page_title;
 
@@ -198,7 +411,53 @@ static BrowserTabInfo ExtractBrowserTabInfo(const std::string& window_title,
         info.domain = domain_match[1].str();
         info.url = "https://" + info.domain;
         info.valid = true;
+        #ifdef _DEBUG
+        std::cout << "[DEBUG] ExtractBrowserTabInfo: Found domain via regex: '" << info.domain 
+                  << "', constructed URL: '" << info.url << "'" << std::endl;
+        #endif
+    } else {
+        #ifdef _DEBUG
+        std::cout << "[DEBUG] ExtractBrowserTabInfo: No domain found in title via regex" << std::endl;
+        #endif
+        
+        // Try alternative patterns for domain extraction
+        std::vector<std::regex> fallback_patterns = {
+            std::regex(R"(https?://([^/\s]+))", std::regex::icase),  // Full URL
+            std::regex(R"(www\.([^/\s]+))", std::regex::icase),      // www.domain.com
+            std::regex(R"(([a-zA-Z0-9-]+\.(com|org|net|edu|gov|co\.uk|io|dev))", std::regex::icase)  // Common TLDs
+        };
+        
+        for (size_t i = 0; i < fallback_patterns.size() && !info.valid; ++i) {
+            std::smatch fallback_match;
+            if (std::regex_search(page_title, fallback_match, fallback_patterns[i]) && fallback_match.size() > 1) {
+                std::string extracted = fallback_match[1].str();
+                // Clean up common prefixes
+                if (extracted.find("www.") == 0) {
+                    extracted = extracted.substr(4);
+                }
+                info.domain = extracted;
+                info.url = "https://" + info.domain;
+                info.valid = true;
+                #ifdef _DEBUG
+                std::cout << "[DEBUG] ExtractBrowserTabInfo: Found domain via fallback pattern " << i 
+                          << ": '" << info.domain << "'" << std::endl;
+                #endif
+                break;
+            }
+        }
+        
+        if (!info.valid) {
+            #ifdef _DEBUG
+            std::cout << "[DEBUG] ExtractBrowserTabInfo: No domain found via any pattern" << std::endl;
+            #endif
+        }
     }
+
+    #ifdef _DEBUG
+    std::cout << "[DEBUG] ExtractBrowserTabInfo: Final result - domain='" << info.domain 
+              << "', url='" << info.url << "', title='" << info.title 
+              << "', browserType='" << info.browserType << "', valid=" << (info.valid ? "true" : "false") << std::endl;
+    #endif
 
     return info;
 }
@@ -208,6 +467,7 @@ struct FocusTrackerConfig {
     int updateIntervalMs = 1000;
     bool includeMetadata = false;
     bool includeSystemApps = false;
+    bool enableBrowserTabTracking = false;
     std::set<std::string> excludedApps;
     std::set<std::string> includedApps;
     
@@ -227,6 +487,11 @@ struct FocusTrackerConfig {
         it = map.find(flutter::EncodableValue("includeSystemApps"));
         if (it != map.end() && std::holds_alternative<bool>(it->second)) {
             config.includeSystemApps = std::get<bool>(it->second);
+        }
+        
+        it = map.find(flutter::EncodableValue("enableBrowserTabTracking"));
+        if (it != map.end() && std::holds_alternative<bool>(it->second)) {
+            config.enableBrowserTabTracking = std::get<bool>(it->second);
         }
         
         it = map.find(flutter::EncodableValue("excludedApps"));
@@ -257,6 +522,7 @@ struct FocusTrackerConfig {
         map[flutter::EncodableValue("updateIntervalMs")] = flutter::EncodableValue(updateIntervalMs);
         map[flutter::EncodableValue("includeMetadata")] = flutter::EncodableValue(includeMetadata);
         map[flutter::EncodableValue("includeSystemApps")] = flutter::EncodableValue(includeSystemApps);
+        map[flutter::EncodableValue("enableBrowserTabTracking")] = flutter::EncodableValue(enableBrowserTabTracking);
         
         flutter::EncodableList excludedList;
         for (const auto& app : excludedApps) {
@@ -443,6 +709,41 @@ void AppFocusTrackerPlugin::HandleMethodCall(
         auto diagnostics = GetDiagnosticInfo();
         result->Success(flutter::EncodableValue(diagnostics));
     }
+    else if (method == "debugUrlExtraction") {
+        // Debug method to test URL extraction on current focused browser
+        HWND hwnd = GetForegroundWindow();
+        flutter::EncodableMap debug_info;
+        
+        if (hwnd) {
+            ProcessInfo proc_info = GetProcessInfoFromWindow(hwnd);
+            debug_info[flutter::EncodableValue("processName")] = flutter::EncodableValue(proc_info.processName);
+            debug_info[flutter::EncodableValue("windowTitle")] = flutter::EncodableValue(proc_info.windowTitle);
+            debug_info[flutter::EncodableValue("executablePath")] = flutter::EncodableValue(proc_info.executablePath);
+            
+            bool is_browser = IsBrowserProcess(proc_info.processName, proc_info.executablePath);
+            debug_info[flutter::EncodableValue("isBrowser")] = flutter::EncodableValue(is_browser);
+            
+            if (is_browser) {
+                // Test UIAutomation extraction
+                std::string uia_url = GetBaseURLFromBrowserWindow(hwnd);
+                debug_info[flutter::EncodableValue("uiAutomationUrl")] = flutter::EncodableValue(uia_url);
+                
+                // Test window title extraction
+                BrowserTabInfo tab_info = ExtractBrowserTabInfo(proc_info.windowTitle, proc_info.processName);
+                flutter::EncodableMap tab_debug;
+                tab_debug[flutter::EncodableValue("domain")] = flutter::EncodableValue(tab_info.domain);
+                tab_debug[flutter::EncodableValue("url")] = flutter::EncodableValue(tab_info.url);
+                tab_debug[flutter::EncodableValue("title")] = flutter::EncodableValue(tab_info.title);
+                tab_debug[flutter::EncodableValue("browserType")] = flutter::EncodableValue(tab_info.browserType);
+                tab_debug[flutter::EncodableValue("valid")] = flutter::EncodableValue(tab_info.valid);
+                debug_info[flutter::EncodableValue("titleExtraction")] = flutter::EncodableValue(tab_debug);
+            }
+        } else {
+            debug_info[flutter::EncodableValue("error")] = flutter::EncodableValue("No foreground window");
+        }
+        
+        result->Success(flutter::EncodableValue(debug_info));
+    }
     else {
         result->NotImplemented();
     }
@@ -469,6 +770,11 @@ void AppFocusTrackerPlugin::StartTracking() {
         }
     });
     
+    // Start browser tab tracking if metadata and browser tab tracking are enabled
+    if (config_.includeMetadata && config_.enableBrowserTabTracking) {
+        StartBrowserTabTracking();
+    }
+    
     // Send initial focus event
     SendCurrentFocusEvent();
 }
@@ -488,6 +794,9 @@ void AppFocusTrackerPlugin::StopTracking() {
     if (update_timer_.joinable()) {
         update_timer_.join();
     }
+    
+    // Stop browser tab tracking
+    StopBrowserTabTracking();
     
     // Send final focus lost event
     if (current_process_id_ != 0) {
@@ -552,6 +861,108 @@ void AppFocusTrackerPlugin::SendPeriodicUpdate() {
     
     AppInfo app_info = CreateAppInfo(current_focused_window_);
     SendFocusEvent(app_info, "durationUpdate", duration);
+}
+
+// Browser Tab Change Detection
+
+void AppFocusTrackerPlugin::StartBrowserTabTracking() {
+    browser_tab_check_timer_ = std::thread([this]() {
+        while (is_tracking_) {
+            CheckForBrowserTabChanges();
+            std::this_thread::sleep_for(std::chrono::milliseconds(500)); // Check every 500ms
+        }
+    });
+}
+
+void AppFocusTrackerPlugin::StopBrowserTabTracking() {
+    if (browser_tab_check_timer_.joinable()) {
+        browser_tab_check_timer_.join();
+    }
+    last_browser_tab_info_.clear();
+}
+
+void AppFocusTrackerPlugin::CheckForBrowserTabChanges() {
+    if (!is_tracking_ || current_process_id_ == 0) return;
+    
+    AppInfo current_app = CreateAppInfo(current_focused_window_);
+    
+    // Check if current app is a browser
+    auto is_browser_it = current_app.metadata.find(flutter::EncodableValue("isBrowser"));
+    if (is_browser_it == current_app.metadata.end() || 
+        !std::holds_alternative<bool>(is_browser_it->second) || 
+        !std::get<bool>(is_browser_it->second)) {
+        // Not a browser, clear last tab info
+        last_browser_tab_info_.clear();
+        return;
+    }
+    
+    // Get current browser tab info
+    auto browser_tab_it = current_app.metadata.find(flutter::EncodableValue("browserTab"));
+    if (browser_tab_it == current_app.metadata.end() || 
+        !std::holds_alternative<flutter::EncodableMap>(browser_tab_it->second)) {
+        last_browser_tab_info_.clear();
+        return;
+    }
+    
+    flutter::EncodableMap current_tab_map = std::get<flutter::EncodableMap>(browser_tab_it->second);
+    
+    // Build comparison key prioritising domain/url; titles change frequently.
+    std::string current_tab_info;
+    auto domain_it = current_tab_map.find(flutter::EncodableValue("domain"));
+    if (domain_it != current_tab_map.end() && std::holds_alternative<std::string>(domain_it->second)) {
+        current_tab_info = std::get<std::string>(domain_it->second);
+    } else {
+        auto url_it = current_tab_map.find(flutter::EncodableValue("url"));
+        if (url_it != current_tab_map.end() && std::holds_alternative<std::string>(url_it->second)) {
+            current_tab_info = std::get<std::string>(url_it->second);
+        }
+    }
+    // If still empty fall back to a sanitized title (remove digits to reduce churn)
+    if (current_tab_info.empty()) {
+        auto title_it = current_tab_map.find(flutter::EncodableValue("title"));
+        if (title_it != current_tab_map.end() && std::holds_alternative<std::string>(title_it->second)) {
+            std::string raw_title = std::get<std::string>(title_it->second);
+            current_tab_info.reserve(raw_title.size());
+            for (char c : raw_title) {
+                if (!(c >= '0' && c <= '9') && c != '.' && c != ',') {
+                    current_tab_info.push_back(c);
+                }
+            }
+        }
+    }
+    
+    // Check if tab info has changed
+    auto last_tab_it = last_browser_tab_info_.find(current_app.identifier);
+    if (last_tab_it != last_browser_tab_info_.end()) {
+        if (last_tab_it->second != current_tab_info) {
+            // Tab has changed, send tab change event
+            SendBrowserTabChangeEvent(current_app, last_tab_it->second, current_tab_info);
+            last_tab_it->second = current_tab_info;
+        }
+    } else {
+        // First time seeing this tab, just store it
+        last_browser_tab_info_[current_app.identifier] = current_tab_info;
+    }
+}
+
+void AppFocusTrackerPlugin::SendBrowserTabChangeEvent(const AppInfo& app_info, const std::string& previous_tab_info, const std::string& current_tab_info) {
+    // Treat tab change within the same browser window as a distinct focus
+    // transition so that downstream duration calculations stay accurate.
+
+    auto current_time = std::chrono::steady_clock::now();
+
+    // Calculate how long the previous tab was focused.
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(current_time - focus_start_time_).count();
+
+    // Emit a focus-lost event for the old tab (using accumulated duration).
+    SendFocusEvent(app_info, "lost", duration);
+
+    // Reset the internal timer so subsequent durationUpdate events measure the
+    // time spent on the newly selected tab.
+    focus_start_time_ = current_time;
+
+    // Emit a focus-gained event for the new tab.
+    SendFocusEvent(app_info, "gained", 0);
 }
 
 void AppFocusTrackerPlugin::SendFocusEvent(const AppInfo& app_info, const std::string& event_type, int64_t duration_microseconds) {
@@ -626,6 +1037,14 @@ AppInfo AppFocusTrackerPlugin::CreateAppInfo(HWND hwnd) {
         // Check if application is a browser and extract tab info
         if (IsBrowserProcess(proc_info.processName, proc_info.executablePath)) {
             BrowserTabInfo tab = ExtractBrowserTabInfo(proc_info.windowTitle, proc_info.processName);
+
+            // Try to get accurate base-URL via UIAutomation
+            std::string baseUrl = GetBaseURLFromBrowserWindow(hwnd);
+            if (!baseUrl.empty()) {
+                tab.url = baseUrl;
+                tab.domain = HostFromUrl(baseUrl);
+                tab.valid = true;
+            }
             app_info.metadata[flutter::EncodableValue("isBrowser")] = flutter::EncodableValue(true);
             if (tab.valid) {
                 flutter::EncodableMap tab_map;
