@@ -10,10 +10,34 @@
 #include <string>
 #include <thread>
 #include <chrono>
+#include <set>
+#include <map>
 
-// Forward declarations
-struct FocusTrackerConfig;
-struct AppInfo;
+// Configuration structure
+struct FocusTrackerConfig {
+    int updateIntervalMs = 1000;
+    bool includeMetadata = false;
+    bool includeSystemApps = false;
+    bool enableBrowserTabTracking = false;
+    std::set<std::string> excludedApps;
+    std::set<std::string> includedApps;
+    
+    static FocusTrackerConfig FromMap(const flutter::EncodableMap& map);
+    flutter::EncodableMap ToMap() const;
+};
+
+// App information structure
+struct AppInfo {
+    std::string name;
+    std::string identifier;
+    DWORD processId;
+    std::string version;
+    std::string iconPath;
+    std::string executablePath;
+    flutter::EncodableMap metadata;
+    
+    flutter::EncodableMap ToMap() const;
+};
 
 class AppFocusTrackerPlugin : public flutter::Plugin, 
                              public flutter::StreamHandler<flutter::EncodableValue> {
