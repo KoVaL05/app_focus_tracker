@@ -12,6 +12,9 @@
 #include <chrono>
 #include <set>
 #include <map>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
 
 // Configuration structure
 struct FocusTrackerConfig {
@@ -76,6 +79,18 @@ private:
     std::map<std::string, std::string> last_browser_tab_info_;
     std::thread browser_tab_check_timer_;
 
+    // Thread-safe event queue for background thread events
+    std::queue<flutter::EncodableMap> event_queue_;
+    std::mutex event_queue_mutex_;
+    std::condition_variable event_queue_cv_;
+    HWND message_window_ = nullptr;
+    std::thread event_processor_thread_; // (may be unused after refactor)
+    bool should_process_events_ = false;
+    std::mutex event_sink_mutex_; // Protect event_sink_ access
+    DWORD platform_thread_id_ = 0; // Store the platform thread ID
+
+    static constexpr UINT kFlushMessageId = WM_APP + 0x40;
+
     // Core tracking methods
     void StartTracking();
     void StopTracking();
@@ -90,7 +105,7 @@ private:
     void SendBrowserTabChangeEvent(const AppInfo& app_info, const std::string& previous_tab_info, const std::string& current_tab_info);
     
     // App information methods
-    AppInfo CreateAppInfo(HWND hwnd);
+    AppInfo CreateAppInfo(HWND hwnd, bool from_background_thread = false);
     bool ShouldTrackApp(const AppInfo& app_info);
     AppInfo GetCurrentFocusedApp();
     flutter::EncodableList GetRunningApplications(bool include_system_apps);
@@ -98,6 +113,15 @@ private:
     // Utility methods
     flutter::EncodableMap GetDiagnosticInfo();
     std::string GenerateSessionId();
+
+    // Event processing methods
+    void QueueEvent(const flutter::EncodableMap& event);
+    void FlushEventQueue();
+    static LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
+    void CreateMessageWindow();
+    void DestroyMessageWindow();
+    bool IsOnPlatformThread() const;
+    void SendEventDirectly(const flutter::EncodableMap& event);
 
     // StreamHandler methods
     std::unique_ptr<flutter::StreamHandlerError<flutter::EncodableValue>> OnListenInternal(
