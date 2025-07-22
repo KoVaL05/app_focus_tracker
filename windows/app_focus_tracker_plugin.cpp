@@ -1379,22 +1379,21 @@ void AppFocusTrackerPlugin::QueueEvent(const flutter::EncodableMap& event) {
 
             auto hwndCopy = message_window_;
 
-            // Lambda must be static C-style callback — wrap required data in closure struct.
-            struct RetryContext {
-                HWND hwnd;
-            };
-
-            static RetryContext ctx; // safe: only message_window_ thread uses it
-            ctx.hwnd = hwndCopy;
-
-            auto timerCallback = [](HWND hwnd, UINT msg, UINT_PTR id, DWORD /*time*/) {
-                if (id != kRetryTimerId) return;
-                KillTimer(hwnd, kRetryTimerId);
-                BOOL ok = PostMessage(hwnd, kFlushMessageId, 0, 0);
-                if (!ok) {
-                    DebugLog("Retry PostMessage failed again: " + std::to_string(GetLastError()));
-                } else {
-                    DebugLog("Retry PostMessage succeeded");
+            // Use a static callback function for SetTimer
+            // Define a traditional function pointer that can be used with SetTimer
+            class TimerCallbackHelper {
+            public:
+                static VOID CALLBACK TimerProc(HWND hwnd, UINT /*msg*/, UINT_PTR id, DWORD /*time*/) {
+                    constexpr UINT_PTR kRetryTimerId = 0xAF01;
+                    if (id != kRetryTimerId) return;
+                    KillTimer(hwnd, kRetryTimerId);
+                    constexpr UINT kFlushMessageId = WM_APP + 0x40; // same as in header
+                    BOOL ok = PostMessage(hwnd, kFlushMessageId, 0, 0);
+                    if (!ok) {
+                        DebugLog("Retry PostMessage failed again: " + std::to_string(GetLastError()));
+                    } else {
+                        DebugLog("Retry PostMessage succeeded");
+                    }
                 }
             };
 
@@ -1404,7 +1403,7 @@ void AppFocusTrackerPlugin::QueueEvent(const flutter::EncodableMap& event) {
 
             // Set the timer directly — if called from a background thread, Windows will
             // route the WM_TIMER to the message_window_ thread because the HWND owns it.
-            if (!SetTimer(message_window_, kRetryTimerId, kRetryDelayMs, timerCallback)) {
+            if (!SetTimer(message_window_, kRetryTimerId, kRetryDelayMs, TimerCallbackHelper::TimerProc)) {
                 DebugLog("SetTimer for PostMessage retry failed: " + std::to_string(GetLastError()));
             }
         } else {

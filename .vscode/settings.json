@@ -65,5 +65,6 @@
     "xtr1common": "cpp",
     "xtree": "cpp",
     "xutility": "cpp"
-  }
+  },
+  "cmake.sourceDirectory": "/Volumes/T7/work-projects/app_focus_tracker/example/windows"
 }
