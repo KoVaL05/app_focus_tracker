@@ -1,6 +1,6 @@
 name: app_focus_tracker
 description: A powerful Flutter plugin for tracking application focus events on macOS and Windows. Monitor when applications gain or lose focus with real-time events, comprehensive configuration options, and robust error handling.
-version: 0.0.5
+version: 0.0.6
 homepage: https://github.com/KoVaL05/app_focus_tracker
 repository: https://github.com/KoVaL05/app_focus_tracker
 issue_tracker: https://github.com/KoVaL05/app_focus_tracker/issues

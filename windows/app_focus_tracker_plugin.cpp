@@ -35,6 +35,31 @@ void DebugLog(const std::string& message) {
     OutputDebugStringA(("[DEBUG] " + message + "\n").c_str());
 }
 
+// Convert Win32 error code to readable string
+std::string Win32ErrorMessage(DWORD error_code) {
+    char* msg_buf = nullptr;
+    size_t size = FormatMessageA(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        NULL,
+        error_code,
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+        (LPSTR)&msg_buf,
+        0,
+        NULL);
+    std::string message;
+    if (size && msg_buf) {
+        message.assign(msg_buf, size);
+        // Trim trailing CR/LF
+        while (!message.empty() && (message.back() == '\n' || message.back() == '\r')) {
+            message.pop_back();
+        }
+        LocalFree(msg_buf);
+    } else {
+        message = "Unknown error";
+    }
+    return message;
+}
+
 // Convert wide string to UTF-8
 std::string WideToUtf8(const std::wstring& wide) {
     if (wide.empty()) return std::string();
@@ -99,6 +124,9 @@ ProcessInfo GetProcessInfoFromWindow(HWND hwnd) {
         }
         
         CloseHandle(hProcess);
+    } else {
+        DWORD err = GetLastError();
+        DebugLog("OpenProcess failed for PID " + std::to_string(info.processId) + ": " + std::to_string(err) + " (" + Win32ErrorMessage(err) + ")");
     }
     
     return info;
@@ -1325,15 +1353,60 @@ void AppFocusTrackerPlugin::QueueEvent(const flutter::EncodableMap& event) {
     {
         std::lock_guard<std::mutex> lock(event_queue_mutex_);
         event_queue_.push(event);
+
+        // Guard against unbounded queue growth
+        static const size_t kMaxQueueSize = 1000;
+        if (event_queue_.size() > kMaxQueueSize) {
+            size_t to_drop = event_queue_.size() - kMaxQueueSize;
+            DebugLog("Event queue exceeded " + std::to_string(kMaxQueueSize) + " items; dropping " + std::to_string(to_drop) + " oldest events");
+            while (to_drop-- > 0 && !event_queue_.empty()) {
+                event_queue_.pop();
+            }
+        }
     }
 
     // Notify the message window (which lives on the platform/UI thread) to flush the queue.
     if (message_window_ != nullptr) {
         BOOL result = PostMessage(message_window_, kFlushMessageId, 0, 0);
         if (!result) {
-            DebugLog("Failed to post message to window: " + std::to_string(GetLastError()));
-            // Don't fallback to direct sending - this would cause the threading error
-            // Instead, just log the error and let the event be queued for later
+            DWORD err = GetLastError();
+            DebugLog("PostMessage failed (" + std::to_string(err) + "), scheduling retry");
+
+            // Schedule a lightweight retry using a one-shot timer so we don't block
+            // the background thread and avoid tight retry loops.
+            constexpr UINT_PTR kRetryTimerId = 0xAF01; // arbitrary, unique per-class
+            constexpr UINT kRetryDelayMs = 20;         // small delay before retrying
+
+            auto hwndCopy = message_window_;
+
+            // Lambda must be static C-style callback — wrap required data in closure struct.
+            struct RetryContext {
+                HWND hwnd;
+            };
+
+            static RetryContext ctx; // safe: only message_window_ thread uses it
+            ctx.hwnd = hwndCopy;
+
+            auto timerCallback = [](HWND hwnd, UINT msg, UINT_PTR id, DWORD /*time*/) {
+                if (id != kRetryTimerId) return;
+                KillTimer(hwnd, kRetryTimerId);
+                BOOL ok = PostMessage(hwnd, kFlushMessageId, 0, 0);
+                if (!ok) {
+                    DebugLog("Retry PostMessage failed again: " + std::to_string(GetLastError()));
+                } else {
+                    DebugLog("Retry PostMessage succeeded");
+                }
+            };
+
+            // SetTimer must be called on the same thread that owns message_window_.
+            // We therefore post a WM_NULL to that window which sets the timer.
+            PostMessage(message_window_, WM_NULL, 0, 0);
+
+            // Set the timer directly — if called from a background thread, Windows will
+            // route the WM_TIMER to the message_window_ thread because the HWND owns it.
+            if (!SetTimer(message_window_, kRetryTimerId, kRetryDelayMs, timerCallback)) {
+                DebugLog("SetTimer for PostMessage retry failed: " + std::to_string(GetLastError()));
+            }
         } else {
             DebugLog("Successfully posted flush message to window");
         }
@@ -1562,6 +1635,9 @@ flutter::EncodableList AppFocusTrackerPlugin::GetRunningApplications(bool includ
                     }
                 }
                 CloseHandle(hProcess);
+            } else {
+                DWORD err = GetLastError();
+                DebugLog("OpenProcess failed in snapshot loop for PID " + std::to_string(pe32.th32ProcessID) + ": " + std::to_string(err) + " (" + Win32ErrorMessage(err) + ")");
             }
         } while (Process32NextW(hSnapshot, &pe32));
     }

@@ -1,3 +1,42 @@
+## 0.0.6
+
+### Stability and Error Handling Improvements
+
+**Windows Platform:**
+- Added PostMessage retry mechanism with 20ms timer to prevent event loss when message posting fails
+- Implemented event queue health monitoring with 1000-event cap to prevent memory bloat
+- Enhanced Win32 error reporting with human-readable error messages via `FormatMessageA`
+- Added detailed logging for `OpenProcess` failures with error codes and descriptions
+- Improved thread safety in event queue management
+
+**macOS Platform:**
+- Moved AppleScript execution to background queue with 300ms timeout to prevent main thread blocking
+- Added 30-second throttling after Apple-Events privacy denial (-1743) to avoid repeated prompts
+- Implemented accessibility permission re-checking with 2-second polling after permission request
+- Added recursion depth limit (1500 levels) to AX tree traversal to prevent stack overflow crashes
+- Enhanced browser tab comparison to ignore dynamic counters and punctuation, reducing false positives
+- Implemented adaptive polling intervals (0.5s for browsers, 1.5s for non-browsers) to improve performance
+- Added `defer` block in `stopTracking()` to guarantee cleanup even during partial failures
+- All debug logging now properly guarded with `#if DEBUG` to prevent production log spam
+
+**Cross-Platform:**
+- Improved error handling and recovery mechanisms across both platforms
+- Enhanced diagnostic information for troubleshooting permission and access issues
+- Better memory management and resource cleanup
+
+### Bug Fixes
+
+**Windows:**
+- Fixed potential event loss when PostMessage fails due to message pump issues
+- Resolved memory growth issues during prolonged message queue stalls
+- Improved error diagnostics for process access failures
+
+**macOS:**
+- Fixed main thread blocking during AppleScript execution
+- Resolved stack overflow crashes on deep accessibility trees
+- Fixed false-positive browser tab change events from dynamic title updates
+- Improved cleanup reliability during tracking start/stop operations
+
 ## 0.0.5
 
 ### Bug Fixes
