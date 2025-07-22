@@ -1378,6 +1378,7 @@ void AppFocusTrackerPlugin::QueueEvent(const flutter::EncodableMap& event) {
             constexpr UINT kRetryDelayMs = 20;         // small delay before retrying
 
             auto hwndCopy = message_window_;
+            (void)hwndCopy;
 
             // Use a static callback function for SetTimer
             // Define a traditional function pointer that can be used with SetTimer
