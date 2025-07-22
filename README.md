@@ -12,6 +12,29 @@ A Flutter plugin for tracking application focus changes across macOS and Windows
 - **Permission Management**: Automatic handling of platform-specific permissions
 - **Performance Optimized**: Efficient event handling with configurable update intervals
 - **Comprehensive Testing**: Extensive test suite covering unit, integration, and performance tests
+- **Robust Error Handling**: Advanced error recovery, memory management, and stability improvements
+
+## Stability and Error Handling
+
+The plugin includes comprehensive error handling and stability improvements:
+
+### Windows Platform
+- **Event Loss Prevention**: Automatic retry mechanism for failed message posting
+- **Memory Management**: Event queue health monitoring with automatic cleanup
+- **Enhanced Diagnostics**: Human-readable Win32 error messages for troubleshooting
+- **Thread Safety**: Improved cross-thread communication and resource management
+
+### macOS Platform  
+- **Non-Blocking Operations**: AppleScript execution moved to background threads
+- **Permission Management**: Automatic re-checking of accessibility permissions
+- **Crash Prevention**: Recursion depth limits and stack overflow protection
+- **Performance Optimization**: Adaptive polling intervals based on application type
+- **Resource Cleanup**: Guaranteed cleanup using defer blocks
+
+### Cross-Platform
+- **Graceful Degradation**: Plugin continues operating even when individual features fail
+- **Comprehensive Logging**: Debug information available for troubleshooting
+- **Memory Safety**: Automatic resource cleanup and memory leak prevention
 
 ## Supported Platforms
 
@@ -27,7 +50,7 @@ Add the plugin to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  app_focus_tracker: ^0.0.1
+  app_focus_tracker: ^0.0.6
 ```
 
 ### Basic Usage
