@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cctype>
 #include <regex>
+#include <unordered_map>
 // Compile-time switch: enable advanced URL extraction via UIAutomation (Windows only).
 // Set to 1 if you want to experiment with UIAutomation; 0 keeps it disabled and
 // avoids unused-function warnings during normal builds.
@@ -134,30 +135,56 @@ ProcessInfo GetProcessInfoFromWindow(HWND hwnd) {
 
 // Get file version information
 std::string GetFileVersion(const std::string& filePath) {
-    std::wstring wFilePath = Utf8ToWide(filePath);
-    
-    DWORD dwSize = GetFileVersionInfoSizeW(wFilePath.c_str(), NULL);
-    if (dwSize == 0) return "";
-    
-    std::vector<BYTE> buffer(dwSize);
-    if (!GetFileVersionInfoW(wFilePath.c_str(), 0, dwSize, buffer.data())) {
-        return "";
-    }
-    
-    VS_FIXEDFILEINFO* pFileInfo = nullptr;
-    UINT len = 0;
-    if (VerQueryValueW(buffer.data(), L"\\", (LPVOID*)&pFileInfo, &len)) {
-        if (pFileInfo) {
-            std::ostringstream version;
-            version << HIWORD(pFileInfo->dwFileVersionMS) << "."
-                   << LOWORD(pFileInfo->dwFileVersionMS) << "."
-                   << HIWORD(pFileInfo->dwFileVersionLS) << "."
-                   << LOWORD(pFileInfo->dwFileVersionLS);
-            return version.str();
+    // The disk lookup below is relatively slow (~1–3 ms per call).  We therefore
+    // cache results so that subsequent look-ups for the same executable are
+    // near-instant, dramatically reducing the time spent in threads that call
+    // this helper many times in quick succession.
+
+    static std::unordered_map<std::string, std::string> kVersionCache;
+    static std::mutex kCacheMutex;
+
+    {
+        std::lock_guard<std::mutex> guard(kCacheMutex);
+        auto it = kVersionCache.find(filePath);
+        if (it != kVersionCache.end()) {
+            return it->second;  // Cached hit (may be empty string if look-up failed previously)
         }
     }
-    
-    return "";
+
+    std::wstring wFilePath = Utf8ToWide(filePath);
+
+    DWORD dwSize = GetFileVersionInfoSizeW(wFilePath.c_str(), NULL);
+    if (dwSize == 0) {
+        std::lock_guard<std::mutex> guard(kCacheMutex);
+        kVersionCache[filePath] = "";  // Negative cache so we don't hammer the disk again.
+        return "";
+    }
+
+    std::vector<BYTE> buffer(dwSize);
+    if (!GetFileVersionInfoW(wFilePath.c_str(), 0, dwSize, buffer.data())) {
+        std::lock_guard<std::mutex> guard(kCacheMutex);
+        kVersionCache[filePath] = "";
+        return "";
+    }
+
+    std::string versionStr;
+    VS_FIXEDFILEINFO* pFileInfo = nullptr;
+    UINT len = 0;
+    if (VerQueryValueW(buffer.data(), L"\\", (LPVOID*)&pFileInfo, &len) && pFileInfo) {
+        std::ostringstream version;
+        version << HIWORD(pFileInfo->dwFileVersionMS) << "."
+               << LOWORD(pFileInfo->dwFileVersionMS) << "."
+               << HIWORD(pFileInfo->dwFileVersionLS) << "."
+               << LOWORD(pFileInfo->dwFileVersionLS);
+        versionStr = version.str();
+    }
+
+    {
+        std::lock_guard<std::mutex> guard(kCacheMutex);
+        kVersionCache[filePath] = versionStr;  // Cache even if empty string (lookup failed)
+    }
+
+    return versionStr;
 }
 
 } // namespace
@@ -1225,7 +1252,10 @@ void AppFocusTrackerPlugin::StopBrowserTabTracking() {
     if (browser_tab_check_timer_.joinable()) {
         browser_tab_check_timer_.join();
     }
-    last_browser_tab_info_.clear();
+    {
+        std::lock_guard<std::mutex> guard(last_tab_mutex_);
+        last_browser_tab_info_.clear();
+    }
 }
 
 void AppFocusTrackerPlugin::CheckForBrowserTabChanges() {
@@ -1241,7 +1271,10 @@ void AppFocusTrackerPlugin::CheckForBrowserTabChanges() {
     // Check if current app is a browser
     if (!IsBrowserProcess(proc_info.processName, proc_info.executablePath)) {
         // Not a browser, clear last tab info
-        last_browser_tab_info_.clear();
+        {
+            std::lock_guard<std::mutex> guard(last_tab_mutex_);
+            last_browser_tab_info_.clear();
+        }
         return;
     }
     
@@ -1270,37 +1303,40 @@ void AppFocusTrackerPlugin::CheckForBrowserTabChanges() {
     }
     
     // Check if tab info has changed
-    auto last_tab_it = last_browser_tab_info_.find(proc_info.executablePath);
-    if (last_tab_it != last_browser_tab_info_.end()) {
-        if (last_tab_it->second != current_tab_info) {
-            // Tab has changed, send tab change event
-            // Create a basic AppInfo for the event
-            AppInfo app_info;
-            app_info.name = proc_info.windowTitle.empty() ? proc_info.processName : proc_info.windowTitle;
-            app_info.identifier = proc_info.executablePath;
-            app_info.processId = proc_info.processId;
-            app_info.executablePath = proc_info.executablePath;
-            
-            // Add basic browser metadata
-            app_info.metadata[flutter::EncodableValue("isBrowser")] = flutter::EncodableValue(true);
-            app_info.metadata[flutter::EncodableValue("processName")] = flutter::EncodableValue(proc_info.processName);
-            app_info.metadata[flutter::EncodableValue("windowTitle")] = flutter::EncodableValue(proc_info.windowTitle);
-            
-            if (tab_info.valid) {
-                flutter::EncodableMap tab_map;
-                tab_map[flutter::EncodableValue("domain")] = flutter::EncodableValue(tab_info.domain);
-                tab_map[flutter::EncodableValue("url")] = flutter::EncodableValue(tab_info.url);
-                tab_map[flutter::EncodableValue("title")] = flutter::EncodableValue(tab_info.title);
-                tab_map[flutter::EncodableValue("browserType")] = flutter::EncodableValue(tab_info.browserType);
-                app_info.metadata[flutter::EncodableValue("browserTab")] = flutter::EncodableValue(tab_map);
+    {
+        std::lock_guard<std::mutex> guard(last_tab_mutex_);
+        auto last_tab_it = last_browser_tab_info_.find(proc_info.executablePath);
+        if (last_tab_it != last_browser_tab_info_.end()) {
+            if (last_tab_it->second != current_tab_info) {
+                // Tab has changed, send tab change event
+                // Create a basic AppInfo for the event
+                AppInfo app_info;
+                app_info.name = proc_info.windowTitle.empty() ? proc_info.processName : proc_info.windowTitle;
+                app_info.identifier = proc_info.executablePath;
+                app_info.processId = proc_info.processId;
+                app_info.executablePath = proc_info.executablePath;
+                
+                // Add basic browser metadata
+                app_info.metadata[flutter::EncodableValue("isBrowser")] = flutter::EncodableValue(true);
+                app_info.metadata[flutter::EncodableValue("processName")] = flutter::EncodableValue(proc_info.processName);
+                app_info.metadata[flutter::EncodableValue("windowTitle")] = flutter::EncodableValue(proc_info.windowTitle);
+                
+                if (tab_info.valid) {
+                    flutter::EncodableMap tab_map;
+                    tab_map[flutter::EncodableValue("domain")] = flutter::EncodableValue(tab_info.domain);
+                    tab_map[flutter::EncodableValue("url")] = flutter::EncodableValue(tab_info.url);
+                    tab_map[flutter::EncodableValue("title")] = flutter::EncodableValue(tab_info.title);
+                    tab_map[flutter::EncodableValue("browserType")] = flutter::EncodableValue(tab_info.browserType);
+                    app_info.metadata[flutter::EncodableValue("browserTab")] = flutter::EncodableValue(tab_map);
+                }
+                
+                SendBrowserTabChangeEvent(app_info, last_tab_it->second, current_tab_info);
+                last_tab_it->second = current_tab_info;
             }
-            
-            SendBrowserTabChangeEvent(app_info, last_tab_it->second, current_tab_info);
-            last_tab_it->second = current_tab_info;
+        } else {
+            // First time seeing this tab, just store it
+            last_browser_tab_info_[proc_info.executablePath] = current_tab_info;
         }
-    } else {
-        // First time seeing this tab, just store it
-        last_browser_tab_info_[proc_info.executablePath] = current_tab_info;
     }
 }
 
@@ -1370,14 +1406,13 @@ void AppFocusTrackerPlugin::QueueEvent(const flutter::EncodableMap& event) {
         std::lock_guard<std::mutex> lock(event_queue_mutex_);
         event_queue_.push(event);
 
-        // Guard against unbounded queue growth
+        // Guard against unbounded queue growth.  We drop only as many events as
+        // necessary – **one at a time** – so that we never hold the mutex for
+        // a long-running loop when the queue has grown very large.
         static const size_t kMaxQueueSize = 1000;
         if (event_queue_.size() > kMaxQueueSize) {
-            size_t to_drop = event_queue_.size() - kMaxQueueSize;
-            DebugLog("Event queue exceeded " + std::to_string(kMaxQueueSize) + " items; dropping " + std::to_string(to_drop) + " oldest events");
-            while (to_drop-- > 0 && !event_queue_.empty()) {
-                event_queue_.pop();
-            }
+            DebugLog("Event queue exceeded " + std::to_string(kMaxQueueSize) + " items; dropping oldest event");
+            event_queue_.pop();
         }
     }
 

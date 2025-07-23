@@ -78,6 +78,9 @@ private:
     // Browser tab tracking
     std::map<std::string, std::string> last_browser_tab_info_;
     std::thread browser_tab_check_timer_;
+    // Guards access to last_browser_tab_info_ to avoid data races between
+    // the background polling thread and the platform thread callbacks.
+    std::mutex last_tab_mutex_;
 
     // Thread-safe event queue for background thread events
     std::queue<flutter::EncodableMap> event_queue_;
