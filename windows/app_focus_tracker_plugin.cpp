@@ -801,22 +801,20 @@ void AppFocusTrackerPlugin::SendEventDirectly(const flutter::EncodableMap& event
     // This method should only be called from the platform thread
     DebugLog("SendEventDirectly: Attempting to send event directly");
 
-    // Copy the sink pointer under the mutex, then release the lock before invoking
-    flutter::EventSink<flutter::EncodableValue>* sink = nullptr;
+    // Hold the mutex for the entire call to Success so the sink cannot be
+    // destroyed out from under us by OnCancelInternal in another thread.
     {
         std::lock_guard<std::mutex> lock(event_sink_mutex_);
-        sink = event_sink_.get();
-    }
-
-    if (sink) {
-        try {
-            sink->Success(event);
-            DebugLog("SendEventDirectly: Successfully sent event");
-        } catch (...) {
-            DebugLog("SendEventDirectly: Exception occurred while sending event directly");
+        if (event_sink_) {
+            try {
+                event_sink_->Success(event);
+                DebugLog("SendEventDirectly: Successfully sent event");
+            } catch (...) {
+                DebugLog("SendEventDirectly: Exception occurred while sending event directly");
+            }
+        } else {
+            DebugLog("SendEventDirectly: Event sink is null");
         }
-    } else {
-        DebugLog("SendEventDirectly: Event sink is null");
     }
 }
 
@@ -836,22 +834,20 @@ void AppFocusTrackerPlugin::FlushEventQueue() {
     while (!local_queue.empty()) {
         const auto& event = local_queue.front();
 
-        // Copy pointer under lock, invoke outside
-        flutter::EventSink<flutter::EncodableValue>* sink = nullptr;
+        // Hold the mutex for the entire call to Success so the sink cannot be
+        // destroyed out from under us by OnCancelInternal in another thread.
         {
             std::lock_guard<std::mutex> lock(event_sink_mutex_);
-            sink = event_sink_.get();
-        }
-
-        if (sink) {
-            try {
-                sink->Success(event);
-                DebugLog("FlushEventQueue: Successfully sent event");
-            } catch (...) {
-                DebugLog("FlushEventQueue: Exception occurred while sending event");
+            if (event_sink_) {
+                try {
+                    event_sink_->Success(event);
+                    DebugLog("FlushEventQueue: Successfully sent event");
+                } catch (...) {
+                    DebugLog("FlushEventQueue: Exception occurred while sending event");
+                }
+            } else {
+                DebugLog("FlushEventQueue: Event sink is null");
             }
-        } else {
-            DebugLog("FlushEventQueue: Event sink is null");
         }
 
         local_queue.pop();
@@ -1303,40 +1299,46 @@ void AppFocusTrackerPlugin::CheckForBrowserTabChanges() {
     }
     
     // Check if tab info has changed
+    bool tab_changed = false;
+    std::string previous_tab_info;
     {
         std::lock_guard<std::mutex> guard(last_tab_mutex_);
         auto last_tab_it = last_browser_tab_info_.find(proc_info.executablePath);
         if (last_tab_it != last_browser_tab_info_.end()) {
             if (last_tab_it->second != current_tab_info) {
-                // Tab has changed, send tab change event
-                // Create a basic AppInfo for the event
-                AppInfo app_info;
-                app_info.name = proc_info.windowTitle.empty() ? proc_info.processName : proc_info.windowTitle;
-                app_info.identifier = proc_info.executablePath;
-                app_info.processId = proc_info.processId;
-                app_info.executablePath = proc_info.executablePath;
-                
-                // Add basic browser metadata
-                app_info.metadata[flutter::EncodableValue("isBrowser")] = flutter::EncodableValue(true);
-                app_info.metadata[flutter::EncodableValue("processName")] = flutter::EncodableValue(proc_info.processName);
-                app_info.metadata[flutter::EncodableValue("windowTitle")] = flutter::EncodableValue(proc_info.windowTitle);
-                
-                if (tab_info.valid) {
-                    flutter::EncodableMap tab_map;
-                    tab_map[flutter::EncodableValue("domain")] = flutter::EncodableValue(tab_info.domain);
-                    tab_map[flutter::EncodableValue("url")] = flutter::EncodableValue(tab_info.url);
-                    tab_map[flutter::EncodableValue("title")] = flutter::EncodableValue(tab_info.title);
-                    tab_map[flutter::EncodableValue("browserType")] = flutter::EncodableValue(tab_info.browserType);
-                    app_info.metadata[flutter::EncodableValue("browserTab")] = flutter::EncodableValue(tab_map);
-                }
-                
-                SendBrowserTabChangeEvent(app_info, last_tab_it->second, current_tab_info);
+                previous_tab_info = last_tab_it->second;
                 last_tab_it->second = current_tab_info;
+                tab_changed = true;
             }
         } else {
-            // First time seeing this tab, just store it
+            // First time seeing this tab
             last_browser_tab_info_[proc_info.executablePath] = current_tab_info;
         }
+    }
+
+    if (tab_changed) {
+        // Build AppInfo outside of the mutex to avoid lock-order inversions
+        AppInfo app_info;
+        app_info.name = proc_info.windowTitle.empty() ? proc_info.processName : proc_info.windowTitle;
+        app_info.identifier = proc_info.executablePath;
+        app_info.processId = proc_info.processId;
+        app_info.executablePath = proc_info.executablePath;
+
+        // Add basic browser metadata
+        app_info.metadata[flutter::EncodableValue("isBrowser")] = flutter::EncodableValue(true);
+        app_info.metadata[flutter::EncodableValue("processName")] = flutter::EncodableValue(proc_info.processName);
+        app_info.metadata[flutter::EncodableValue("windowTitle")] = flutter::EncodableValue(proc_info.windowTitle);
+
+        if (tab_info.valid) {
+            flutter::EncodableMap tab_map;
+            tab_map[flutter::EncodableValue("domain")] = flutter::EncodableValue(tab_info.domain);
+            tab_map[flutter::EncodableValue("url")] = flutter::EncodableValue(tab_info.url);
+            tab_map[flutter::EncodableValue("title")] = flutter::EncodableValue(tab_info.title);
+            tab_map[flutter::EncodableValue("browserType")] = flutter::EncodableValue(tab_info.browserType);
+            app_info.metadata[flutter::EncodableValue("browserTab")] = flutter::EncodableValue(tab_map);
+        }
+
+        SendBrowserTabChangeEvent(app_info, previous_tab_info, current_tab_info);
     }
 }
 
@@ -1449,14 +1451,14 @@ void AppFocusTrackerPlugin::QueueEvent(const flutter::EncodableMap& event) {
                 }
             };
 
-            // SetTimer must be called on the same thread that owns message_window_.
-            // We therefore post a WM_NULL to that window which sets the timer.
-            PostMessage(message_window_, WM_NULL, 0, 0);
-
-            // Set the timer directly — if called from a background thread, Windows will
-            // route the WM_TIMER to the message_window_ thread because the HWND owns it.
-            if (!SetTimer(message_window_, kRetryTimerId, kRetryDelayMs, TimerCallbackHelper::TimerProc)) {
-                DebugLog("SetTimer for PostMessage retry failed: " + std::to_string(GetLastError()));
+            // Double-check the window again inside the critical section.
+            HWND hwnd_for_timer = message_window_;
+            if (hwnd_for_timer) {
+                // SetTimer must be called on the same thread that owns message_window_.
+                PostMessage(hwnd_for_timer, WM_NULL, 0, 0);
+                if (!SetTimer(hwnd_for_timer, kRetryTimerId, kRetryDelayMs, TimerCallbackHelper::TimerProc)) {
+                    DebugLog("SetTimer for PostMessage retry failed: " + std::to_string(GetLastError()));
+                }
             }
         } else {
             DebugLog("Successfully posted flush message to window");
