@@ -86,6 +86,7 @@ private:
     std::queue<flutter::EncodableMap> event_queue_;
     std::mutex event_queue_mutex_;
     HWND message_window_ = nullptr;
+    std::mutex event_sink_mutex_; // Protect event_sink_ access
     DWORD platform_thread_id_ = 0; // Store the platform thread ID
 
     static constexpr UINT kFlushMessageId = WM_APP + 0x40;

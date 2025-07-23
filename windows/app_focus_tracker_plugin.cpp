@@ -867,38 +867,25 @@ void AppFocusTrackerPlugin::FlushEventQueue() {
 }
 
 AppFocusTrackerPlugin::AppFocusTrackerPlugin() 
-    : is_tracking_(false), current_process_id_(0), focus_start_time_(std::chrono::steady_clock::now()),
-      should_process_events_(false) {
-    // Wrap constructor in SEH to catch any unexpected access violations
-    // and prevent silent process termination during plugin initialization.
-    __try {
-        bool kHasDebugger = ::IsDebuggerPresent();
-        if (kHasDebugger) {
-            DebugLog("========================================");
-            DebugLog("App Focus Tracker Plugin: Constructor called");
-            DebugLog("========================================");
-        }
-        
-        // Capture the platform thread ID
-        platform_thread_id_ = GetCurrentThreadId();
-        if (kHasDebugger) {
-            DebugLog("Platform thread ID captured: " + std::to_string(platform_thread_id_));
-        }
-        
-        g_plugin_instance = this;
-        CreateMessageWindow();
-        
-        if (kHasDebugger) {
-            DebugLog("AppFocusTrackerPlugin: Constructor completed");
-        }
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
-        // If any unexpected exception occurs during construction, disable
-        // the plugin gracefully rather than crashing the entire process.
-        message_window_ = nullptr;
-        g_plugin_instance = nullptr;
-        if (::IsDebuggerPresent()) {
-            DebugLog("AppFocusTrackerPlugin: Constructor failed with exception - plugin disabled");
-        }
+    : is_tracking_(false), current_process_id_(0), focus_start_time_(std::chrono::steady_clock::now()) {
+    bool kHasDebugger = ::IsDebuggerPresent();
+    if (kHasDebugger) {
+        DebugLog("========================================");
+        DebugLog("App Focus Tracker Plugin: Constructor called");
+        DebugLog("========================================");
+    }
+    
+    // Capture the platform thread ID
+    platform_thread_id_ = GetCurrentThreadId();
+    if (kHasDebugger) {
+        DebugLog("Platform thread ID captured: " + std::to_string(platform_thread_id_));
+    }
+    
+    g_plugin_instance = this;
+    CreateMessageWindow();
+    
+    if (kHasDebugger) {
+        DebugLog("AppFocusTrackerPlugin: Constructor completed");
     }
 }
 
