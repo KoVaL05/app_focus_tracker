@@ -773,15 +773,20 @@ bool AppFocusTrackerPlugin::IsOnPlatformThread() const {
 void AppFocusTrackerPlugin::SendEventDirectly(const flutter::EncodableMap& event) {
     // This method should only be called from the platform thread
     DebugLog("SendEventDirectly: Attempting to send event directly");
-    
-    std::lock_guard<std::mutex> lock(event_sink_mutex_);
-    if (event_sink_) {
+
+    // Copy the sink pointer under the mutex, then release the lock before invoking
+    flutter::EventSink<flutter::EncodableValue>* sink = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(event_sink_mutex_);
+        sink = event_sink_.get();
+    }
+
+    if (sink) {
         try {
-            event_sink_->Success(event);
+            sink->Success(event);
             DebugLog("SendEventDirectly: Successfully sent event");
         } catch (...) {
-            // Handle any exceptions that might occur during event sending
-            DebugLog("Exception occurred while sending event directly");
+            DebugLog("SendEventDirectly: Exception occurred while sending event directly");
         }
     } else {
         DebugLog("SendEventDirectly: Event sink is null");
@@ -791,33 +796,37 @@ void AppFocusTrackerPlugin::SendEventDirectly(const flutter::EncodableMap& event
 void AppFocusTrackerPlugin::FlushEventQueue() {
     // This method is called from the platform thread via the message window
     DebugLog("FlushEventQueue: Processing queued events");
-    
+
     std::queue<flutter::EncodableMap> local_queue;
     {
         std::lock_guard<std::mutex> lock(event_queue_mutex_);
         std::swap(local_queue, event_queue_);
     }
-    
+
     DebugLog("FlushEventQueue: Processing " + std::to_string(local_queue.size()) + " events");
-    
+
     // Process all queued events on the platform thread
     while (!local_queue.empty()) {
         const auto& event = local_queue.front();
+
+        // Copy pointer under lock, invoke outside
+        flutter::EventSink<flutter::EncodableValue>* sink = nullptr;
         {
             std::lock_guard<std::mutex> lock(event_sink_mutex_);
-            if (event_sink_) {
-                try {
-                    event_sink_->Success(event);
-                    DebugLog("FlushEventQueue: Successfully sent event");
-                } catch (...) {
-                    // Handle any exceptions that might occur during event sending
-                    // This prevents crashes if the event sink becomes invalid
-                    DebugLog("FlushEventQueue: Exception occurred while sending event");
-                }
-            } else {
-                DebugLog("FlushEventQueue: Event sink is null");
-            }
+            sink = event_sink_.get();
         }
+
+        if (sink) {
+            try {
+                sink->Success(event);
+                DebugLog("FlushEventQueue: Successfully sent event");
+            } catch (...) {
+                DebugLog("FlushEventQueue: Exception occurred while sending event");
+            }
+        } else {
+            DebugLog("FlushEventQueue: Event sink is null");
+        }
+
         local_queue.pop();
     }
 }
@@ -993,7 +1002,7 @@ void AppFocusTrackerPlugin::HandleMethodCall(
     }
     else if (method == "getRunningApplications") {
         std::cout << "[DEBUG] HandleMethodCall: getRunningApplications called" << std::endl;
-        
+
         bool include_system_apps = false;
         if (method_call.arguments() && std::holds_alternative<flutter::EncodableMap>(*method_call.arguments())) {
             auto args = std::get<flutter::EncodableMap>(*method_call.arguments());
@@ -1002,8 +1011,15 @@ void AppFocusTrackerPlugin::HandleMethodCall(
                 include_system_apps = std::get<bool>(it->second);
             }
         }
-        auto apps = GetRunningApplications(include_system_apps);
-        result->Success(flutter::EncodableValue(apps));
+
+        // Perform the expensive enumeration on a background thread so we don't block the UI.
+        auto async_result = std::shared_ptr<flutter::MethodResult<flutter::EncodableValue>>(result.release());
+        std::thread([this, include_system_apps, async_result]() {
+            auto apps = GetRunningApplications(include_system_apps);
+            if (async_result) {
+                async_result->Success(flutter::EncodableValue(apps));
+            }
+        }).detach();
     }
     else if (method == "getDiagnosticInfo") {
         std::cout << "[DEBUG] HandleMethodCall: getDiagnosticInfo called" << std::endl;
@@ -1618,7 +1634,7 @@ flutter::EncodableList AppFocusTrackerPlugin::GetRunningApplications(bool includ
     
     if (Process32FirstW(hSnapshot, &pe32)) {
         do {
-            HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pe32.th32ProcessID);
+            HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe32.th32ProcessID);
             if (hProcess) {
                 wchar_t executablePath[MAX_PATH];
                 DWORD pathSize = sizeof(executablePath) / sizeof(wchar_t);
@@ -1637,7 +1653,10 @@ flutter::EncodableList AppFocusTrackerPlugin::GetRunningApplications(bool includ
                 CloseHandle(hProcess);
             } else {
                 DWORD err = GetLastError();
-                DebugLog("OpenProcess failed in snapshot loop for PID " + std::to_string(pe32.th32ProcessID) + ": " + std::to_string(err) + " (" + Win32ErrorMessage(err) + ")");
+                // Suppress noisy access-denied logging to avoid flooding the output and potential performance impact
+                if (err != ERROR_ACCESS_DENIED) {
+                    DebugLog("OpenProcess failed in snapshot loop for PID " + std::to_string(pe32.th32ProcessID) + ": " + std::to_string(err));
+                }
             }
         } while (Process32NextW(hSnapshot, &pe32));
     }

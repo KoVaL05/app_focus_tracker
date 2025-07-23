@@ -1,3 +1,28 @@
+## 0.0.7
+
+### Windows Deadlock Prevention and Testing Infrastructure
+
+**Windows Platform Improvements:**
+- **Event Sink Mutex Safety**: Fixed potential deadlock by copying event sink pointer under mutex and releasing lock before Flutter calls
+- **Async Process Enumeration**: Moved `getRunningApplications()` to background thread to prevent UI thread blocking
+- **Reduced Process Access Privileges**: Changed from `PROCESS_QUERY_INFORMATION` to `PROCESS_QUERY_LIMITED_INFORMATION` for better compatibility
+- **Improved Error Handling**: Suppressed noisy access-denied error logging to prevent performance impact and log flooding
+- **Enhanced Resource Management**: Improved cleanup operations in `FlushEventQueue()` with proper mutex handling
+
+**Testing Infrastructure Enhancements:**
+- **Comprehensive Windows Deadlock Test Suite**: Added `test/platform_specific/windows_deadlock_test.dart` with stress testing for concurrent event generation and UI thread operations
+- **Manual Testing Framework**: Added `test/manual/` directory with release build testing guide and manual test script
+- **Test Runner Integration**: Integrated Windows deadlock tests into the main test runner for automated CI/CD
+- **Release Build Verification**: Added manual test script specifically for Windows release build deadlock prevention
+
+**Test Coverage Improvements:**
+- **Event Queue Threading Safety**: Tests for mutex deadlock prevention in event sink operations
+- **Process Enumeration Thread Safety**: Verification of async operation without UI blocking
+- **Error Recovery and Resource Management**: Stress testing under heavy load conditions
+- **Release Build Simulation**: Tests to catch timing-dependent deadlocks that only occur in release builds
+- **Font Rendering Contention**: Prevention of DirectWrite-related deadlocks during font operations
+- **High-Frequency Event Generation**: Testing from background threads with UI thread responsiveness validation
+
 ## 0.0.6
 
 ### Stability and Error Handling Improvements

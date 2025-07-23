@@ -15,6 +15,7 @@ import 'integration/focus_tracking_integration_test.dart' as integration_tests;
 // Platform-specific tests
 import 'platform_specific/macos_test.dart' as macos_tests;
 import 'platform_specific/windows_test.dart' as windows_tests;
+import 'platform_specific/windows_deadlock_test.dart' as windows_deadlock_tests;
 
 // Performance tests
 import 'performance/stress_test.dart' as performance_tests;
@@ -39,6 +40,7 @@ void main() {
     group('💻 Platform-Specific Tests', () {
       group('macOS Platform', macos_tests.main);
       group('Windows Platform', windows_tests.main);
+      group('Windows Deadlock Prevention', windows_deadlock_tests.main);
     });
 
     group('⚡ Performance Tests', () {
