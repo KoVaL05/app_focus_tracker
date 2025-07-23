@@ -747,7 +747,10 @@ LRESULT CALLBACK AppFocusTrackerPlugin::MessageWndProc(HWND hwnd, UINT msg, WPAR
 }
 
 void AppFocusTrackerPlugin::CreateMessageWindow() {
-    DebugLog("CreateMessageWindow: Creating message window");
+    bool kHasDebugger = ::IsDebuggerPresent();
+    if (kHasDebugger) {
+        DebugLog("CreateMessageWindow: Creating message window");
+    }
     
     // Register class if not already registered
     static bool class_registered = false;
@@ -758,12 +761,17 @@ void AppFocusTrackerPlugin::CreateMessageWindow() {
         wc.hInstance = GetModuleHandle(nullptr);
         
         ATOM result = RegisterClassW(&wc);
-        if (result == 0) {
-            // Registration failed, but we'll try to continue
-            DebugLog("Failed to register message window class: " + std::to_string(GetLastError()));
-        } else {
+        if (result == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+            // Registration failed with a real error, abort window creation
+            if (kHasDebugger) {
+                DebugLog("Failed to register message window class: " + std::to_string(GetLastError()));
+            }
+            return;
+        } else if (result != 0) {
             class_registered = true;
-            DebugLog("Successfully registered message window class");
+            if (kHasDebugger) {
+                DebugLog("Successfully registered message window class");
+            }
         }
     }
     
@@ -771,9 +779,13 @@ void AppFocusTrackerPlugin::CreateMessageWindow() {
         message_window_ = CreateWindowExW(0, kMsgWindowClassName, L"", 0, 0, 0, 0, 0,
                                           HWND_MESSAGE, nullptr, nullptr, nullptr);
         if (!message_window_) {
-            DebugLog("Failed to create message window: " + std::to_string(GetLastError()));
+            if (kHasDebugger) {
+                DebugLog("Failed to create message window: " + std::to_string(GetLastError()));
+            }
         } else {
-            DebugLog("Successfully created message window: " + std::to_string((uintptr_t)message_window_));
+            if (kHasDebugger) {
+                DebugLog("Successfully created message window: " + std::to_string((uintptr_t)message_window_));
+            }
         }
     }
 }
@@ -857,18 +869,37 @@ void AppFocusTrackerPlugin::FlushEventQueue() {
 AppFocusTrackerPlugin::AppFocusTrackerPlugin() 
     : is_tracking_(false), current_process_id_(0), focus_start_time_(std::chrono::steady_clock::now()),
       should_process_events_(false) {
-    DebugLog("========================================");
-    DebugLog("App Focus Tracker Plugin: Constructor called");
-    DebugLog("========================================");
-    
-    // Capture the platform thread ID
-    platform_thread_id_ = GetCurrentThreadId();
-    DebugLog("Platform thread ID captured: " + std::to_string(platform_thread_id_));
-    
-    g_plugin_instance = this;
-    CreateMessageWindow();
-    
-    DebugLog("AppFocusTrackerPlugin: Constructor completed");
+    // Wrap constructor in SEH to catch any unexpected access violations
+    // and prevent silent process termination during plugin initialization.
+    __try {
+        bool kHasDebugger = ::IsDebuggerPresent();
+        if (kHasDebugger) {
+            DebugLog("========================================");
+            DebugLog("App Focus Tracker Plugin: Constructor called");
+            DebugLog("========================================");
+        }
+        
+        // Capture the platform thread ID
+        platform_thread_id_ = GetCurrentThreadId();
+        if (kHasDebugger) {
+            DebugLog("Platform thread ID captured: " + std::to_string(platform_thread_id_));
+        }
+        
+        g_plugin_instance = this;
+        CreateMessageWindow();
+        
+        if (kHasDebugger) {
+            DebugLog("AppFocusTrackerPlugin: Constructor completed");
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        // If any unexpected exception occurs during construction, disable
+        // the plugin gracefully rather than crashing the entire process.
+        message_window_ = nullptr;
+        g_plugin_instance = nullptr;
+        if (::IsDebuggerPresent()) {
+            DebugLog("AppFocusTrackerPlugin: Constructor failed with exception - plugin disabled");
+        }
+    }
 }
 
 AppFocusTrackerPlugin::~AppFocusTrackerPlugin() {
@@ -1419,19 +1450,24 @@ void AppFocusTrackerPlugin::QueueEvent(const flutter::EncodableMap& event) {
     }
 
     // Notify the message window (which lives on the platform/UI thread) to flush the queue.
-    if (message_window_ != nullptr) {
-        BOOL result = PostMessage(message_window_, kFlushMessageId, 0, 0);
+    HWND hwnd = message_window_;
+    if (hwnd != nullptr) {
+        BOOL result = PostMessage(hwnd, kFlushMessageId, 0, 0);
         if (!result) {
             DWORD err = GetLastError();
             DebugLog("PostMessage failed (" + std::to_string(err) + "), scheduling retry");
 
+            // If the message window disappeared (e.g., StopTracking already
+            // destroyed it) there is no point retrying – bail out.
+            if (hwnd == nullptr) {
+                DebugLog("Message window destroyed – aborting retry schedule");
+                return;
+            }
+            
             // Schedule a lightweight retry using a one-shot timer so we don't block
             // the background thread and avoid tight retry loops.
             constexpr UINT_PTR kRetryTimerId = 0xAF01; // arbitrary, unique per-class
             constexpr UINT kRetryDelayMs = 20;         // small delay before retrying
-
-            auto hwndCopy = message_window_;
-            (void)hwndCopy;
 
             // Use a static callback function for SetTimer
             // Define a traditional function pointer that can be used with SetTimer
@@ -1450,10 +1486,10 @@ void AppFocusTrackerPlugin::QueueEvent(const flutter::EncodableMap& event) {
                     }
                 }
             };
-
+            
             // Double-check the window again inside the critical section.
-            HWND hwnd_for_timer = message_window_;
-            if (hwnd_for_timer) {
+            HWND hwnd_for_timer = hwnd;
+            if (hwnd_for_timer != nullptr) {
                 // SetTimer must be called on the same thread that owns message_window_.
                 PostMessage(hwnd_for_timer, WM_NULL, 0, 0);
                 if (!SetTimer(hwnd_for_timer, kRetryTimerId, kRetryDelayMs, TimerCallbackHelper::TimerProc)) {
@@ -1769,12 +1805,14 @@ AppFocusTrackerPlugin::OnListenInternal(
     // This is called on the platform thread
     DebugLog("OnListenInternal: Setting up event sink");
     
-    std::lock_guard<std::mutex> lock(event_sink_mutex_);
-    event_sink_ = std::move(events);
-    
-    // If we have any queued events, flush them now
+    {
+        std::lock_guard<std::mutex> lock(event_sink_mutex_);
+        event_sink_ = std::move(events);
+    }
+    // Flush queued events *after* releasing the mutex to avoid re-entrant
+    // locking inside FlushEventQueue.
     FlushEventQueue();
-    
+ 
     DebugLog("OnListenInternal: Event sink setup complete");
     
     return nullptr;
