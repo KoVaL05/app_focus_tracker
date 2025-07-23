@@ -50,7 +50,7 @@ Add the plugin to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  app_focus_tracker: ^0.0.6
+  app_focus_tracker: ^0.0.7
 ```
 
 ### Basic Usage
@@ -360,7 +360,34 @@ The plugin includes an extensive test suite:
 - **Integration Tests**: End-to-end workflows and scenarios
 - **Platform-Specific Tests**: macOS and Windows specific features
 - **Performance Tests**: Stress testing and memory management
+- **Windows Deadlock Prevention Tests**: Comprehensive testing for Windows-specific threading and deadlock scenarios
 - **Mock Platform**: Comprehensive simulation for testing
+
+**Windows Deadlock Testing:**
+The plugin includes a specialized test suite (`test/platform_specific/windows_deadlock_test.dart`) that simulates the exact conditions that could cause deadlocks in Windows applications:
+
+- **Concurrent Event Generation**: Tests multiple threads generating events rapidly while UI thread processes them
+- **Event Queue Threading Safety**: Verifies mutex deadlock prevention in event sink operations
+- **Process Enumeration Thread Safety**: Ensures `getRunningApplications` executes asynchronously without blocking UI
+- **Error Recovery**: Tests system recovery from native crashes and resource cleanup under stress
+- **Release Build Simulation**: Catches timing-dependent deadlocks that may only occur in release builds
+- **Font Rendering Contention**: Prevents DirectWrite-related deadlocks during font operations
+
+**Manual Testing Framework:**
+For release build verification, the plugin includes a manual testing framework (`test/manual/`):
+
+- **Release Build Testing Guide**: Comprehensive documentation for testing in actual Windows release builds
+- **Manual Test Script**: `windows_release_deadlock_test.dart` for real-world deadlock prevention verification
+- **Stress Testing Instructions**: Guidelines for thorough verification of deadlock fixes
+- **Debugging Tools**: Tips for identifying and resolving remaining threading issues
+
+**Windows Platform Improvements:**
+The Windows implementation includes several critical fixes to prevent deadlocks:
+
+- **Event Sink Mutex Safety**: Fixed potential deadlock by copying event sink pointer under mutex and releasing lock before Flutter calls
+- **Async Process Enumeration**: Moved `getRunningApplications()` to background thread to prevent UI thread blocking
+- **Reduced Process Access Privileges**: Uses `PROCESS_QUERY_LIMITED_INFORMATION` for better compatibility
+- **Improved Error Handling**: Suppressed noisy access-denied error logging to prevent performance impact
 
 Run tests with:
 ```bash
@@ -383,4 +410,3 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for a list of changes and version history.
-
