@@ -885,17 +885,11 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
     // MARK: - App Information Extraction
 
     private func createAppInfo(from app: NSRunningApplication) -> AppInfo {
-        let name = app.localizedName ?? app.bundleIdentifier ?? "Unknown"
+        let appName = app.localizedName ?? app.bundleIdentifier ?? "Unknown"
         let identifier = app.bundleIdentifier ?? app.executableURL?.path ?? "unknown"
         let processId = Int(app.processIdentifier)
 
         let rawWindowTitle = windowTitle(for: app)
-        let displayName: String
-        if let wTitle = rawWindowTitle, !wTitle.isEmpty {
-            displayName = wTitle
-        } else {
-            displayName = name
-        }
         var metadata: [String: Any] = [:]
         metadata["bundleURL"] = app.bundleURL?.path
         metadata["executableURL"] = app.executableURL?.path
@@ -951,12 +945,13 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
         }
 
         return AppInfo(
-            name: displayName,
+            name: appName,
             identifier: identifier,
             processId: processId,
             version: version,
             iconPath: iconPath,
             executablePath: app.executableURL?.path,
+            windowTitle: rawWindowTitle,
             metadata: metadata
         )
     }
@@ -1117,6 +1112,7 @@ private struct AppInfo {
     let version: String?
     let iconPath: String?
     let executablePath: String?
+    let windowTitle: String?
     let metadata: [String: Any]?
 
     var isBrowser: Bool {
@@ -1138,6 +1134,7 @@ private struct AppInfo {
         if let version = version { json["version"] = version }
         if let iconPath = iconPath { json["iconPath"] = iconPath }
         if let executablePath = executablePath { json["executablePath"] = executablePath }
+        if let windowTitle = windowTitle { json["windowTitle"] = windowTitle }
         if let metadata = metadata { json["metadata"] = metadata }
 
         return json

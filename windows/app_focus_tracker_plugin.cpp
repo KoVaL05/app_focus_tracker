@@ -81,6 +81,18 @@ std::wstring Utf8ToWide(const std::string& utf8) {
     return result;
 }
 
+// Return a display-friendly process name by stripping a trailing ".exe" (case-insensitive).
+static std::string StripExeExtension(const std::string& file_name) {
+    if (file_name.size() >= 4) {
+        std::string tail = file_name.substr(file_name.size() - 4);
+        std::transform(tail.begin(), tail.end(), tail.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (tail == ".exe") {
+            return file_name.substr(0, file_name.size() - 4);
+        }
+    }
+    return file_name;
+}
+
 // Get process information
 struct ProcessInfo {
     DWORD processId;
@@ -710,6 +722,9 @@ flutter::EncodableMap AppInfo::ToMap() const {
     if (!executablePath.empty()) {
         map[flutter::EncodableValue("executablePath")] = flutter::EncodableValue(executablePath);
     }
+    if (!windowTitle.empty()) {
+        map[flutter::EncodableValue("windowTitle")] = flutter::EncodableValue(windowTitle);
+    }
     if (!metadata.empty()) {
         map[flutter::EncodableValue("metadata")] = flutter::EncodableValue(metadata);
     }
@@ -1337,10 +1352,12 @@ void AppFocusTrackerPlugin::CheckForBrowserTabChanges() {
     if (tab_changed) {
         // Build AppInfo outside of the mutex to avoid lock-order inversions
         AppInfo app_info;
-        app_info.name = proc_info.windowTitle.empty() ? proc_info.processName : proc_info.windowTitle;
+        // Use application name (process executable without .exe) and keep window title separately
+        app_info.name = StripExeExtension(proc_info.processName);
         app_info.identifier = proc_info.executablePath;
         app_info.processId = proc_info.processId;
         app_info.executablePath = proc_info.executablePath;
+        app_info.windowTitle = proc_info.windowTitle;
 
         // Add basic browser metadata
         app_info.metadata[flutter::EncodableValue("isBrowser")] = flutter::EncodableValue(true);
@@ -1516,10 +1533,12 @@ AppInfo AppFocusTrackerPlugin::CreateAppInfo(HWND hwnd, bool from_background_thr
     
     ProcessInfo proc_info = GetProcessInfoFromWindow(hwnd);
     
-    app_info.name = proc_info.windowTitle.empty() ? proc_info.processName : proc_info.windowTitle;
+    // Use application name (process executable without .exe) instead of window title
+    app_info.name = StripExeExtension(proc_info.processName);
     app_info.identifier = proc_info.executablePath;
     app_info.processId = proc_info.processId;
     app_info.executablePath = proc_info.executablePath;
+    app_info.windowTitle = proc_info.windowTitle;
     
     // Get version information
     if (!proc_info.executablePath.empty()) {
@@ -1700,7 +1719,7 @@ flutter::EncodableList AppFocusTrackerPlugin::GetRunningApplications(bool includ
                 DWORD pathSize = sizeof(executablePath) / sizeof(wchar_t);
                 if (QueryFullProcessImageNameW(hProcess, 0, executablePath, &pathSize)) {
                     AppInfo app_info;
-                    app_info.name = WideToUtf8(pe32.szExeFile);
+                    app_info.name = StripExeExtension(WideToUtf8(pe32.szExeFile));
                     app_info.identifier = WideToUtf8(executablePath);
                     app_info.processId = pe32.th32ProcessID;
                     app_info.executablePath = WideToUtf8(executablePath);

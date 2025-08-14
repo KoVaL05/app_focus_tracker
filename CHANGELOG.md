@@ -1,3 +1,21 @@
+## 0.0.9
+
+### App name and window title consistency
+
+Cross-platform changes:
+
+- AppInfo now exposes a top-level `windowTitle` field in both Windows and macOS implementations and includes it in event payloads and `getCurrentFocusedApp`/`getRunningApplications` responses.
+- The `appName` in events and `AppInfo.name` now use the application’s display name, not the active window title.
+
+Platform details:
+
+- Windows: `name` is derived from the process executable name with the `.exe` suffix removed; `windowTitle` is provided separately. Running apps enumeration also strips `.exe` from names.
+- macOS: `name` uses `localizedName`/bundle identifier; `windowTitle` is provided separately via Accessibility API.
+
+Notes:
+
+- Back-compat: `metadata['windowTitle']` is still present for existing consumers, but you should prefer the new top-level `windowTitle`.
+
 ## 0.0.7
 
 ### Windows Deadlock Prevention and Testing Infrastructure

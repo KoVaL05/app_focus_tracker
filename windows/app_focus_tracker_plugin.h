@@ -37,6 +37,7 @@ struct AppInfo {
     std::string version;
     std::string iconPath;
     std::string executablePath;
+    std::string windowTitle;
     flutter::EncodableMap metadata;
     
     flutter::EncodableMap ToMap() const;

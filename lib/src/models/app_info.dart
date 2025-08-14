@@ -24,6 +24,9 @@ class AppInfo {
   /// The full path to the application executable
   final String? executablePath;
 
+  /// The window title of the currently focused window for this app (if available)
+  final String? windowTitle;
+
   /// Additional platform-specific metadata
   final Map<String, dynamic>? metadata;
 
@@ -35,6 +38,7 @@ class AppInfo {
     this.version,
     this.iconPath,
     this.executablePath,
+    this.windowTitle,
     this.metadata,
   });
 
@@ -49,6 +53,7 @@ class AppInfo {
       version: json['version'] as String?,
       iconPath: json['iconPath'] as String?,
       executablePath: json['executablePath'] as String?,
+      windowTitle: json['windowTitle'] as String?,
       metadata: safeMapConversion(json['metadata']),
     );
   }
@@ -62,6 +67,7 @@ class AppInfo {
       'version': version,
       'iconPath': iconPath,
       'executablePath': executablePath,
+      'windowTitle': windowTitle,
       'metadata': metadata,
     };
   }
