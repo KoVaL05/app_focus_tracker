@@ -84,6 +84,26 @@ void main() {
           'eventId': 'test_event_id',
           'sessionId': 'test_session',
           'metadata': {'version': '1.0.0'},
+          'input': {
+            'supported': true,
+            'permissionsGranted': true,
+            'delta': {
+              'activeMs': 1000,
+              'idleMs': 0,
+              'keystrokes': 2,
+              'mouseClicks': 1,
+              'scrollTicks': 3,
+              'mouseMoveScreenUnits': 0.01,
+            },
+            'cumulative': {
+              'activeMs': 5000,
+              'idleMs': 1000,
+              'keystrokes': 20,
+              'mouseClicks': 5,
+              'scrollTicks': 30,
+              'mouseMoveScreenUnits': 0.25,
+            }
+          },
         };
 
         final event = FocusEvent.fromJson(json);
@@ -97,6 +117,10 @@ void main() {
         expect(event.eventId, equals('test_event_id'));
         expect(event.sessionId, equals('test_session'));
         expect(event.metadata, equals({'version': '1.0.0'}));
+        expect(event.input, isNotNull);
+        expect(event.input!.supported, isTrue);
+        expect(event.input!.delta.keystrokes, 2);
+        expect(event.input!.cumulative.mouseClicks, 5);
       });
 
       test('handles legacy duration formats', () {

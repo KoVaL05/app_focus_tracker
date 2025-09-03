@@ -24,6 +24,13 @@ struct FocusTrackerConfig {
     bool enableBrowserTabTracking = false;
     std::set<std::string> excludedApps;
     std::set<std::string> includedApps;
+    // Input activity tracking
+    bool enableInputActivityTracking = false;
+    int inputSamplingIntervalMs = 1000;
+    int inputIdleThresholdMs = 5000;
+    bool normalizeMouseToVirtualDesktop = true;
+    bool countKeyRepeat = true;
+    bool includeMiddleButtonClicks = true;
     
     static FocusTrackerConfig FromMap(const flutter::EncodableMap& map);
     flutter::EncodableMap ToMap() const;
@@ -130,6 +137,50 @@ private:
         std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&& events) override;
     std::unique_ptr<flutter::StreamHandlerError<flutter::EncodableValue>> OnCancelInternal(
         const flutter::EncodableValue* arguments) override;
+
+    // ---------------- Input Activity Tracking (Windows) -----------------
+    // Low-level hooks and sampler
+    HHOOK keyboard_hook_ = nullptr;
+    HHOOK mouse_hook_ = nullptr;
+    std::thread input_sampler_thread_;
+    bool input_sampler_running_ = false;
+
+    // Input state and counters
+    std::mutex input_mutex_;
+    std::chrono::steady_clock::time_point last_input_time_;
+    POINT last_mouse_point_ = {0, 0};
+    double virtual_desktop_diag_ = 1.0;
+
+    int delta_active_ms_ = 0;
+    int delta_idle_ms_ = 0;
+    int delta_keystrokes_ = 0;
+    int delta_mouse_clicks_ = 0;
+    int delta_scroll_ticks_ = 0;
+    double delta_mouse_move_units_ = 0.0;
+
+    int cum_active_ms_ = 0;
+    int cum_idle_ms_ = 0;
+    int cum_keystrokes_ = 0;
+    int cum_mouse_clicks_ = 0;
+    int cum_scroll_ticks_ = 0;
+    double cum_mouse_move_units_ = 0.0;
+
+    double scroll_accumulator_ = 0.0;
+    std::set<DWORD> pressed_keys_;
+
+    bool input_supported_ = false;
+    bool input_permissions_granted_ = false;
+
+    void StartInputTracking();
+    void StopInputTracking();
+    void StartInputSampler();
+    void StopInputSampler();
+    void ResetDeltaCounters();
+    void ResetCumulativeCounters();
+    void ComputeVirtualDesktopDiagonal();
+
+    static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
+    static LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam);
 };
 
 #endif  // FLUTTER_PLUGIN_APP_FOCUS_TRACKER_PLUGIN_H_
