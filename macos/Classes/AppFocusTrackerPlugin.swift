@@ -2,6 +2,15 @@ import Cocoa
 import FlutterMacOS
 import ApplicationServices
 
+// C-compatible CGEvent tap callback; forwards to the plugin instance via userInfo
+private func inputEventTapCallback(_ proxy: CGEventTapProxy, _ type: CGEventType, _ event: CGEvent, _ refcon: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
+    guard let refcon = refcon else {
+        return Unmanaged.passUnretained(event)
+    }
+    let plugin = Unmanaged<AppFocusTrackerPlugin>.fromOpaque(refcon).takeUnretainedValue()
+    return plugin.handleInputEvent(type: type, event: event)
+}
+
 // MARK: - Browser Detection Helpers
 
 private let kBrowserBundleIdentifiers: Set<String> = [
@@ -709,6 +718,73 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
 
     // MARK: - Input Activity Tracking: Setup & Hooks
 
+    // Route CGEvent tap events to an instance method without capturing context in a closure
+    fileprivate func handleInputEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        guard isTracking else { return Unmanaged.passUnretained(event) }
+        lastInputAt = Date()
+        guard let cfg = config, cfg.enableInputActivityTracking else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        switch type {
+        case .keyDown:
+            // Count key repeat per config
+            if cfg.countKeyRepeat || event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+                deltaKeystrokes += 1
+                cumulativeKeystrokes += 1
+            }
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            if type == .otherMouseDown {
+                // Button 2 is middle
+                let buttonNumber = event.getIntegerValueField(.mouseEventButtonNumber)
+                if buttonNumber == 2 {
+                    if cfg.includeMiddleButtonClicks {
+                        deltaMouseClicks += 1
+                        cumulativeMouseClicks += 1
+                    }
+                } else {
+                    deltaMouseClicks += 1
+                    cumulativeMouseClicks += 1
+                }
+            } else {
+                deltaMouseClicks += 1
+                cumulativeMouseClicks += 1
+            }
+        case .scrollWheel:
+            // Convert line-based/pixel-based to ticks; assume 120 px per tick for pixel
+            let isPixelBased = event.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
+            var ticks: Double = 0.0
+            if isPixelBased {
+                let dy = event.getDoubleValueField(.scrollWheelEventPointDeltaAxis1)
+                ticks = dy / 120.0
+            } else {
+                let linesY = event.getIntegerValueField(.scrollWheelEventDeltaAxis1)
+                ticks = Double(linesY)
+            }
+            scrollAccumulator += ticks
+            // Extract full ticks and keep remainder
+            let fullTicks = Int(scrollAccumulator.rounded(.towardZero))
+            scrollAccumulator -= Double(fullTicks)
+            if fullTicks != 0 {
+                deltaScrollTicks += abs(fullTicks)
+                cumulativeScrollTicks += abs(fullTicks)
+            }
+        case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
+            if cfg.normalizeMouseToVirtualDesktop {
+                let dx = event.getDoubleValueField(.mouseEventDeltaX)
+                let dy = event.getDoubleValueField(.mouseEventDeltaY)
+                let magnitude = sqrt(dx*dx + dy*dy)
+                let normalized = magnitude / virtualDiagonal
+                deltaMouseMoveScreenUnits += normalized
+                cumulativeMouseMoveScreenUnits += normalized
+            }
+        default:
+            break
+        }
+
+        return Unmanaged.passUnretained(event)
+    }
+
     private func setupVirtualDesktopDiagonal() {
         guard let screens = NSScreen.screens as [NSScreen]? else {
             virtualDiagonal = 1.0
@@ -743,79 +819,13 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
         eventsMask |= maskBit(.rightMouseDragged)
         eventsMask |= maskBit(.otherMouseDragged)
 
-        let callback: CGEventTapCallBack = { [weak self] (_, type, event, _) -> Unmanaged<CGEvent>? in
-            guard let self = self, self.isTracking else { return Unmanaged.passUnretained(event) }
-            self.lastInputAt = Date()
-            guard let cfg = self.config, cfg.enableInputActivityTracking else {
-                return Unmanaged.passUnretained(event)
-            }
-
-            switch type {
-            case .keyDown:
-                // Count key repeat per config
-                if cfg.countKeyRepeat || event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
-                    self.deltaKeystrokes += 1
-                    self.cumulativeKeystrokes += 1
-                }
-            case .leftMouseDown, .rightMouseDown, .otherMouseDown:
-                if type == .otherMouseDown {
-                    // Button 2 is middle
-                    let buttonNumber = event.getIntegerValueField(.mouseEventButtonNumber)
-                    if buttonNumber == 2 {
-                        if cfg.includeMiddleButtonClicks {
-                            self.deltaMouseClicks += 1
-                            self.cumulativeMouseClicks += 1
-                        }
-                    } else {
-                        self.deltaMouseClicks += 1
-                        self.cumulativeMouseClicks += 1
-                    }
-                } else {
-                    self.deltaMouseClicks += 1
-                    self.cumulativeMouseClicks += 1
-                }
-            case .scrollWheel:
-                // Convert line-based/pixel-based to ticks; assume 120 px per tick for pixel
-                let isPixelBased = event.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
-                var ticks: Double = 0.0
-                if isPixelBased {
-                    let dy = event.getDoubleValueField(.scrollWheelEventPointDeltaAxis1)
-                    ticks = dy / 120.0
-                } else {
-                    let linesY = event.getIntegerValueField(.scrollWheelEventDeltaAxis1)
-                    ticks = Double(linesY)
-                }
-                self.scrollAccumulator += ticks
-                // Extract full ticks and keep remainder
-                let fullTicks = Int(self.scrollAccumulator.rounded(.towardZero))
-                self.scrollAccumulator -= Double(fullTicks)
-                if fullTicks != 0 {
-                    self.deltaScrollTicks += abs(fullTicks)
-                    self.cumulativeScrollTicks += abs(fullTicks)
-                }
-            case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
-                if cfg.normalizeMouseToVirtualDesktop {
-                    let dx = event.getDoubleValueField(.mouseEventDeltaX)
-                    let dy = event.getDoubleValueField(.mouseEventDeltaY)
-                    let magnitude = sqrt(dx*dx + dy*dy)
-                    let normalized = magnitude / self.virtualDiagonal
-                    self.deltaMouseMoveScreenUnits += normalized
-                    self.cumulativeMouseMoveScreenUnits += normalized
-                }
-            default:
-                break
-            }
-
-            return Unmanaged.passUnretained(event)
-        }
-
         if let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
             options: .defaultTap,
             eventsOfInterest: eventsMask,
-            callback: callback,
-            userInfo: nil
+            callback: inputEventTapCallback,
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) {
             inputTap = tap
             inputRunLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
