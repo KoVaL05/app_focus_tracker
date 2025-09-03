@@ -40,6 +40,32 @@ class FocusTrackerConfig {
   /// Requires includeMetadata to be true
   final bool enableBrowserTabTracking;
 
+  // Input activity tracking configuration
+  /// Enable per-interval input activity tracking (keyboard + mouse)
+  /// Defaults to false for backward compatibility
+  final bool enableInputActivityTracking;
+
+  /// Sampling interval for input aggregation in milliseconds.
+  /// Defaults to 1000ms
+  final int inputSamplingIntervalMs;
+
+  /// Idle threshold in milliseconds. If the time since last input is below
+  /// this threshold for a sampling slice, the slice is counted as active.
+  /// Defaults to 5000ms
+  final int inputIdleThresholdMs;
+
+  /// Normalize mouse movement to virtual desktop diagonal units.
+  /// Defaults to true
+  final bool normalizeMouseToVirtualDesktop;
+
+  /// Count OS key-repeat events as keystrokes.
+  /// Defaults to true
+  final bool countKeyRepeat;
+
+  /// Include middle mouse button as a click.
+  /// Defaults to true
+  final bool includeMiddleButtonClicks;
+
   /// Creates a new [FocusTrackerConfig] instance.
   const FocusTrackerConfig({
     this.updateIntervalMs = 1000,
@@ -51,6 +77,12 @@ class FocusTrackerConfig {
     this.maxBatchSize = 10,
     this.maxBatchWaitMs = 5000,
     this.enableBrowserTabTracking = false,
+    this.enableInputActivityTracking = false,
+    this.inputSamplingIntervalMs = 1000,
+    this.inputIdleThresholdMs = 5000,
+    this.normalizeMouseToVirtualDesktop = true,
+    this.countKeyRepeat = true,
+    this.includeMiddleButtonClicks = true,
   });
 
   /// Creates a default configuration for optimal performance.
@@ -105,6 +137,12 @@ class FocusTrackerConfig {
       maxBatchSize: json['maxBatchSize'] as int? ?? 10,
       maxBatchWaitMs: json['maxBatchWaitMs'] as int? ?? 5000,
       enableBrowserTabTracking: json['enableBrowserTabTracking'] as bool? ?? false,
+      enableInputActivityTracking: json['enableInputActivityTracking'] as bool? ?? false,
+      inputSamplingIntervalMs: json['inputSamplingIntervalMs'] as int? ?? 1000,
+      inputIdleThresholdMs: json['inputIdleThresholdMs'] as int? ?? 5000,
+      normalizeMouseToVirtualDesktop: json['normalizeMouseToVirtualDesktop'] as bool? ?? true,
+      countKeyRepeat: json['countKeyRepeat'] as bool? ?? true,
+      includeMiddleButtonClicks: json['includeMiddleButtonClicks'] as bool? ?? true,
     );
   }
 
@@ -120,6 +158,12 @@ class FocusTrackerConfig {
       'maxBatchSize': maxBatchSize,
       'maxBatchWaitMs': maxBatchWaitMs,
       'enableBrowserTabTracking': enableBrowserTabTracking,
+      'enableInputActivityTracking': enableInputActivityTracking,
+      'inputSamplingIntervalMs': inputSamplingIntervalMs,
+      'inputIdleThresholdMs': inputIdleThresholdMs,
+      'normalizeMouseToVirtualDesktop': normalizeMouseToVirtualDesktop,
+      'countKeyRepeat': countKeyRepeat,
+      'includeMiddleButtonClicks': includeMiddleButtonClicks,
     };
   }
 
@@ -134,6 +178,12 @@ class FocusTrackerConfig {
     int? maxBatchSize,
     int? maxBatchWaitMs,
     bool? enableBrowserTabTracking,
+    bool? enableInputActivityTracking,
+    int? inputSamplingIntervalMs,
+    int? inputIdleThresholdMs,
+    bool? normalizeMouseToVirtualDesktop,
+    bool? countKeyRepeat,
+    bool? includeMiddleButtonClicks,
   }) {
     return FocusTrackerConfig(
       updateIntervalMs: updateIntervalMs ?? this.updateIntervalMs,
@@ -145,6 +195,12 @@ class FocusTrackerConfig {
       maxBatchSize: maxBatchSize ?? this.maxBatchSize,
       maxBatchWaitMs: maxBatchWaitMs ?? this.maxBatchWaitMs,
       enableBrowserTabTracking: enableBrowserTabTracking ?? this.enableBrowserTabTracking,
+      enableInputActivityTracking: enableInputActivityTracking ?? this.enableInputActivityTracking,
+      inputSamplingIntervalMs: inputSamplingIntervalMs ?? this.inputSamplingIntervalMs,
+      inputIdleThresholdMs: inputIdleThresholdMs ?? this.inputIdleThresholdMs,
+      normalizeMouseToVirtualDesktop: normalizeMouseToVirtualDesktop ?? this.normalizeMouseToVirtualDesktop,
+      countKeyRepeat: countKeyRepeat ?? this.countKeyRepeat,
+      includeMiddleButtonClicks: includeMiddleButtonClicks ?? this.includeMiddleButtonClicks,
     );
   }
 
@@ -160,7 +216,13 @@ class FocusTrackerConfig {
         enableBatching == other.enableBatching &&
         maxBatchSize == other.maxBatchSize &&
         maxBatchWaitMs == other.maxBatchWaitMs &&
-        enableBrowserTabTracking == other.enableBrowserTabTracking;
+        enableBrowserTabTracking == other.enableBrowserTabTracking &&
+        enableInputActivityTracking == other.enableInputActivityTracking &&
+        inputSamplingIntervalMs == other.inputSamplingIntervalMs &&
+        inputIdleThresholdMs == other.inputIdleThresholdMs &&
+        normalizeMouseToVirtualDesktop == other.normalizeMouseToVirtualDesktop &&
+        countKeyRepeat == other.countKeyRepeat &&
+        includeMiddleButtonClicks == other.includeMiddleButtonClicks;
   }
 
   @override
@@ -175,6 +237,12 @@ class FocusTrackerConfig {
       maxBatchSize,
       maxBatchWaitMs,
       enableBrowserTabTracking,
+      enableInputActivityTracking,
+      inputSamplingIntervalMs,
+      inputIdleThresholdMs,
+      normalizeMouseToVirtualDesktop,
+      countKeyRepeat,
+      includeMiddleButtonClicks,
     );
   }
 
@@ -182,6 +250,10 @@ class FocusTrackerConfig {
   String toString() {
     return 'FocusTrackerConfig(updateIntervalMs: $updateIntervalMs, '
         'includeMetadata: $includeMetadata, includeSystemApps: $includeSystemApps, '
-        'enableBatching: $enableBatching, enableBrowserTabTracking: $enableBrowserTabTracking)';
+        'enableBatching: $enableBatching, enableBrowserTabTracking: $enableBrowserTabTracking, '
+        'enableInputActivityTracking: $enableInputActivityTracking, '
+        'inputSamplingIntervalMs: $inputSamplingIntervalMs, inputIdleThresholdMs: $inputIdleThresholdMs, '
+        'normalizeMouseToVirtualDesktop: $normalizeMouseToVirtualDesktop, countKeyRepeat: $countKeyRepeat, '
+        'includeMiddleButtonClicks: $includeMiddleButtonClicks)';
   }
 }

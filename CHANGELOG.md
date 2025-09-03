@@ -1,5 +1,17 @@
 ## 0.0.9
 
+### Input Activity Tracking (optional)
+
+- Added optional per-interval keyboard/mouse input aggregation attached to focus events.
+- New `FocusTrackerConfig` fields: `enableInputActivityTracking`, `inputSamplingIntervalMs`, `inputIdleThresholdMs`,
+  `normalizeMouseToVirtualDesktop`, `countKeyRepeat`, `includeMiddleButtonClicks`.
+- `FocusEvent` now includes optional `input` payload with `delta` and `cumulative` stats.
+- macOS: Implemented CGEventTap-based hooks, sampler, normalized mouse movement, and scroll tick standardization.
+- Windows: Implemented low-level hooks (WH_KEYBOARD_LL/WH_MOUSE_LL), sampler, normalized mouse movement, and scroll tick standardization.
+- Backward compatible: `input` omitted when disabled/unsupported.
+
+## 0.0.8
+
 ### App name and window title consistency
 
 Cross-platform changes:

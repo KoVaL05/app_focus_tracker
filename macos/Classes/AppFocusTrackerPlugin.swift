@@ -345,6 +345,13 @@ private struct FocusTrackerConfig {
     let enableBatching: Bool
     let maxBatchSize: Int
     let maxBatchWaitMs: Int
+    // Input activity tracking
+    let enableInputActivityTracking: Bool
+    let inputSamplingIntervalMs: Int
+    let inputIdleThresholdMs: Int
+    let normalizeMouseToVirtualDesktop: Bool
+    let countKeyRepeat: Bool
+    let includeMiddleButtonClicks: Bool
 
     static func fromJson(_ json: [String: Any]) -> FocusTrackerConfig {
         return FocusTrackerConfig(
@@ -356,7 +363,13 @@ private struct FocusTrackerConfig {
             includedApps: Set((json["includedApps"] as? [String]) ?? []),
             enableBatching: json["enableBatching"] as? Bool ?? false,
             maxBatchSize: json["maxBatchSize"] as? Int ?? 10,
-            maxBatchWaitMs: json["maxBatchWaitMs"] as? Int ?? 5000
+            maxBatchWaitMs: json["maxBatchWaitMs"] as? Int ?? 5000,
+            enableInputActivityTracking: json["enableInputActivityTracking"] as? Bool ?? false,
+            inputSamplingIntervalMs: json["inputSamplingIntervalMs"] as? Int ?? 1000,
+            inputIdleThresholdMs: json["inputIdleThresholdMs"] as? Int ?? 5000,
+            normalizeMouseToVirtualDesktop: json["normalizeMouseToVirtualDesktop"] as? Bool ?? true,
+            countKeyRepeat: json["countKeyRepeat"] as? Bool ?? true,
+            includeMiddleButtonClicks: json["includeMiddleButtonClicks"] as? Bool ?? true
         )
     }
 
@@ -370,7 +383,13 @@ private struct FocusTrackerConfig {
             "includedApps": Array(includedApps),
             "enableBatching": enableBatching,
             "maxBatchSize": maxBatchSize,
-            "maxBatchWaitMs": maxBatchWaitMs
+            "maxBatchWaitMs": maxBatchWaitMs,
+            "enableInputActivityTracking": enableInputActivityTracking,
+            "inputSamplingIntervalMs": inputSamplingIntervalMs,
+            "inputIdleThresholdMs": inputIdleThresholdMs,
+            "normalizeMouseToVirtualDesktop": normalizeMouseToVirtualDesktop,
+            "countKeyRepeat": countKeyRepeat,
+            "includeMiddleButtonClicks": includeMiddleButtonClicks
         ]
     }
 }
@@ -388,7 +407,13 @@ extension FocusTrackerConfig {
             includedApps: [],
             enableBatching: false,
             maxBatchSize: 10,
-            maxBatchWaitMs: 5000
+            maxBatchWaitMs: 5000,
+            enableInputActivityTracking: false,
+            inputSamplingIntervalMs: 1000,
+            inputIdleThresholdMs: 5000,
+            normalizeMouseToVirtualDesktop: true,
+            countKeyRepeat: true,
+            includeMiddleButtonClicks: true
         )
     }
 }
@@ -454,6 +479,35 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
 
     // Monitor accessibility permission changes
     private var permissionCheckTimer: Timer?
+
+    // Input activity tracking
+    private var inputTap: CFMachPort?
+    private var inputRunLoopSource: CFRunLoopSource?
+    private var inputSamplingTimer: Timer?
+    private var inputLastSampleAt: Date?
+    private var lastInputAt: Date?
+
+    // Virtual desktop normalization
+    private var virtualDiagonal: Double = 1.0
+
+    // Per-slice (delta) counters
+    private var deltaActiveMs: Int = 0
+    private var deltaIdleMs: Int = 0
+    private var deltaKeystrokes: Int = 0
+    private var deltaMouseClicks: Int = 0
+    private var deltaScrollTicks: Int = 0
+    private var deltaMouseMoveScreenUnits: Double = 0.0
+
+    // Cumulative counters (since focus gained)
+    private var cumulativeActiveMs: Int = 0
+    private var cumulativeIdleMs: Int = 0
+    private var cumulativeKeystrokes: Int = 0
+    private var cumulativeMouseClicks: Int = 0
+    private var cumulativeScrollTicks: Int = 0
+    private var cumulativeMouseMoveScreenUnits: Double = 0.0
+
+    // Scroll fractional accumulator (keep remainder between intervals)
+    private var scrollAccumulator: Double = 0.0
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let instance = AppFocusTrackerPlugin()
@@ -593,6 +647,13 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
         setupFocusNotifications()
         startPeriodicUpdates()
 
+        // Set up input activity tracking if enabled
+        if config.enableInputActivityTracking {
+            setupVirtualDesktopDiagonal()
+            startInputHooks()
+            startInputSampler()
+        }
+
         // Send initial focus event for currently active app
         sendCurrentFocusEvent()
 
@@ -618,6 +679,10 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
         removeFocusNotifications()
         stopPeriodicUpdates()
 
+        // Stop input hooks/sampler
+        stopInputSampler()
+        stopInputHooks()
+
         // Send final focus lost event if applicable
         if let currentApp = currentFocusedApp, let startTime = focusStartTime {
             sendFocusEvent(for: currentApp, eventType: .lost, duration: Date().timeIntervalSince(startTime))
@@ -640,6 +705,184 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
             name: NSWorkspace.didDeactivateApplicationNotification,
             object: nil
         )
+    }
+
+    // MARK: - Input Activity Tracking: Setup & Hooks
+
+    private func setupVirtualDesktopDiagonal() {
+        guard let screens = NSScreen.screens as [NSScreen]? else {
+            virtualDiagonal = 1.0
+            return
+        }
+        var unionRect = CGRect.null
+        for s in screens { unionRect = unionRect.union(s.frame) }
+        let w = unionRect.width
+        let h = unionRect.height
+        let diag = sqrt(Double(w*w + h*h))
+        virtualDiagonal = max(1.0, diag)
+    }
+
+    private func startInputHooks() {
+        guard inputTap == nil else { return }
+        guard hasAccessibilityPermissions() else { return }
+
+        let mask = (
+            (1 << CGEventType.keyDown.rawValue) |
+            (1 << CGEventType.flagsChanged.rawValue) |
+            (1 << CGEventType.leftMouseDown.rawValue) |
+            (1 << CGEventType.rightMouseDown.rawValue) |
+            (1 << CGEventType.otherMouseDown.rawValue) |
+            (1 << CGEventType.scrollWheel.rawValue) |
+            (1 << CGEventType.mouseMoved.rawValue) |
+            (1 << CGEventType.leftMouseDragged.rawValue) |
+            (1 << CGEventType.rightMouseDragged.rawValue) |
+            (1 << CGEventType.otherMouseDragged.rawValue)
+        )
+
+        let callback: CGEventTapCallBack = { [weak self] (_, type, event, _) -> Unmanaged<CGEvent>? in
+            guard let self = self, self.isTracking else { return Unmanaged.passUnretained(event) }
+            self.lastInputAt = Date()
+            guard let cfg = self.config, cfg.enableInputActivityTracking else {
+                return Unmanaged.passUnretained(event)
+            }
+
+            switch type {
+            case .keyDown:
+                // Count key repeat per config
+                if cfg.countKeyRepeat || event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+                    self.deltaKeystrokes += 1
+                    self.cumulativeKeystrokes += 1
+                }
+            case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+                if type == .otherMouseDown {
+                    // Button 2 is middle
+                    let buttonNumber = event.getIntegerValueField(.mouseEventButtonNumber)
+                    if buttonNumber == 2 {
+                        if cfg.includeMiddleButtonClicks {
+                            self.deltaMouseClicks += 1
+                            self.cumulativeMouseClicks += 1
+                        }
+                    } else {
+                        self.deltaMouseClicks += 1
+                        self.cumulativeMouseClicks += 1
+                    }
+                } else {
+                    self.deltaMouseClicks += 1
+                    self.cumulativeMouseClicks += 1
+                }
+            case .scrollWheel:
+                // Convert line-based/pixel-based to ticks; assume 120 px per tick for pixel
+                let isPixelBased = event.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
+                var ticks: Double = 0.0
+                if isPixelBased {
+                    let dy = event.getDoubleValueField(.scrollWheelEventPointDeltaAxis1)
+                    ticks = dy / 120.0
+                } else {
+                    let linesY = event.getIntegerValueField(.scrollWheelEventDeltaAxis1)
+                    ticks = Double(linesY)
+                }
+                self.scrollAccumulator += ticks
+                // Extract full ticks and keep remainder
+                let fullTicks = Int(self.scrollAccumulator.rounded(.towardZero))
+                self.scrollAccumulator -= Double(fullTicks)
+                if fullTicks != 0 {
+                    self.deltaScrollTicks += abs(fullTicks)
+                    self.cumulativeScrollTicks += abs(fullTicks)
+                }
+            case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
+                if cfg.normalizeMouseToVirtualDesktop {
+                    let dx = event.getDoubleValueField(.mouseEventDeltaX)
+                    let dy = event.getDoubleValueField(.mouseEventDeltaY)
+                    let magnitude = sqrt(dx*dx + dy*dy)
+                    let normalized = magnitude / self.virtualDiagonal
+                    self.deltaMouseMoveScreenUnits += normalized
+                    self.cumulativeMouseMoveScreenUnits += normalized
+                }
+            default:
+                break
+            }
+
+            return Unmanaged.passUnretained(event)
+        }
+
+        if let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: CGEventMask(mask),
+            callback: callback,
+            userInfo: nil
+        ) {
+            inputTap = tap
+            inputRunLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+            if let src = inputRunLoopSource {
+                CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
+                CGEvent.tapEnable(tap: tap, enable: true)
+            }
+            lastInputAt = Date()
+            inputLastSampleAt = Date()
+        }
+    }
+
+    private func stopInputHooks() {
+        if let tap = inputTap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+        }
+        if let src = inputRunLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes)
+        }
+        inputRunLoopSource = nil
+        inputTap = nil
+    }
+
+    private func startInputSampler() {
+        guard inputSamplingTimer == nil, let cfg = config else { return }
+        let interval = TimeInterval(cfg.inputSamplingIntervalMs) / 1000.0
+        inputSamplingTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            self?.sampleInputSlice()
+        }
+    }
+
+    private func stopInputSampler() {
+        inputSamplingTimer?.invalidate()
+        inputSamplingTimer = nil
+    }
+
+    private func sampleInputSlice() {
+        guard let cfg = config, cfg.enableInputActivityTracking else { return }
+        let now = Date()
+        let lastInput = lastInputAt ?? now
+        let sinceLastInputMs = now.timeIntervalSince(lastInput) * 1000.0
+        let sliceMs = Double(cfg.inputSamplingIntervalMs)
+        if sinceLastInputMs < Double(cfg.inputIdleThresholdMs) {
+            deltaActiveMs += Int(sliceMs)
+            cumulativeActiveMs += Int(sliceMs)
+        } else {
+            deltaIdleMs += Int(sliceMs)
+            cumulativeIdleMs += Int(sliceMs)
+        }
+        inputLastSampleAt = now
+    }
+
+    private func resetDeltaCounters() {
+        deltaActiveMs = 0
+        deltaIdleMs = 0
+        deltaKeystrokes = 0
+        deltaMouseClicks = 0
+        deltaScrollTicks = 0
+        deltaMouseMoveScreenUnits = 0.0
+    }
+
+    private func resetCumulativeCounters() {
+        cumulativeActiveMs = 0
+        cumulativeIdleMs = 0
+        cumulativeKeystrokes = 0
+        cumulativeMouseClicks = 0
+        cumulativeScrollTicks = 0
+        cumulativeMouseMoveScreenUnits = 0.0
+        scrollAccumulator = 0.0
+        lastInputAt = Date()
+        inputLastSampleAt = Date()
     }
 
     private func removeFocusNotifications() {
@@ -675,6 +918,9 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
         // Update current focus
         currentFocusedApp = appInfo
         focusStartTime = Date()
+        // Reset cumulative counters for new app focus
+        resetCumulativeCounters()
+        resetDeltaCounters()
 
         // Send focus gained event
         sendFocusEvent(for: appInfo, eventType: .gained, duration: 0)
@@ -691,6 +937,8 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
 
         currentFocusedApp = nil
         focusStartTime = nil
+        resetCumulativeCounters()
+        resetDeltaCounters()
     }
 
     private func startPeriodicUpdates() {
@@ -705,6 +953,9 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
         if config.includeMetadata && config.enableBrowserTabTracking {
             startBrowserTabTracking()
         }
+
+        // Reset cumulative counters when focus gained is emitted
+        resetCumulativeCounters()
     }
 
     private func stopPeriodicUpdates() {
@@ -721,6 +972,10 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
               let startTime = focusStartTime else { return }
 
         let duration = Date().timeIntervalSince(startTime)
+        // Sampling window close: attribute active/idle for the elapsed update interval if sampler wasn't running
+        if config?.enableInputActivityTracking == true && inputSamplingTimer == nil {
+            sampleInputSlice()
+        }
         sendFocusEvent(for: currentApp, eventType: .durationUpdate, duration: duration)
     }
 
@@ -868,7 +1123,7 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
         let durationMicroseconds = Int(duration * 1_000_000)
         let timestamp = Date()
 
-        let focusEvent = FocusEvent(
+        var focusEvent = FocusEvent(
             appName: appInfo.name,
             appIdentifier: appInfo.identifier,
             timestamp: timestamp,
@@ -879,7 +1134,49 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
             metadata: config.includeMetadata ? appInfo.metadata : nil
         )
 
-        eventSink?(focusEvent.toJson())
+        if config.enableInputActivityTracking {
+            var json = focusEvent.toJson()
+            let supported = hasAccessibilityPermissions()
+            let perms = supported
+            let delta: [String: Any] = [
+                "activeMs": deltaActiveMs,
+                "idleMs": deltaIdleMs,
+                "keystrokes": deltaKeystrokes,
+                "mouseClicks": deltaMouseClicks,
+                "scrollTicks": deltaScrollTicks,
+                "mouseMoveScreenUnits": deltaMouseMoveScreenUnits,
+            ]
+            let cumulative: [String: Any] = [
+                "activeMs": cumulativeActiveMs,
+                "idleMs": cumulativeIdleMs,
+                "keystrokes": cumulativeKeystrokes,
+                "mouseClicks": cumulativeMouseClicks,
+                "scrollTicks": cumulativeScrollTicks,
+                "mouseMoveScreenUnits": cumulativeMouseMoveScreenUnits,
+            ]
+            json["input"] = [
+                "supported": supported,
+                "permissionsGranted": perms,
+                "delta": delta,
+                "cumulative": cumulative,
+            ]
+            eventSink?(json)
+            // Reset delta after emission on durationUpdate; leave cumulative until focus lost
+            if eventType == .durationUpdate {
+                resetDeltaCounters()
+            }
+            if eventType == .gained {
+                // On gained, spec allows zero or after first interval; we reset cumulative here
+                resetCumulativeCounters()
+            }
+            if eventType == .lost {
+                // After flushing final event, reset both sets for next app
+                resetDeltaCounters()
+                resetCumulativeCounters()
+            }
+        } else {
+            eventSink?(focusEvent.toJson())
+        }
     }
 
     // MARK: - App Information Extraction

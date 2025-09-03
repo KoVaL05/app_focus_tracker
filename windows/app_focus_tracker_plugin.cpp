@@ -20,6 +20,7 @@
 #include <cctype>
 #include <regex>
 #include <unordered_map>
+#include <cmath>
 // Compile-time switch: enable advanced URL extraction via UIAutomation (Windows only).
 // Set to 1 if you want to experiment with UIAutomation; 0 keeps it disabled and
 // avoids unused-function warnings during normal builds.
@@ -200,6 +201,100 @@ std::string GetFileVersion(const std::string& filePath) {
 }
 
 } // namespace
+
+// -------------------- Input Tracking Implementation ---------------------
+
+void AppFocusTrackerPlugin::ComputeVirtualDesktopDiagonal() {
+    // Compute union of monitor bounds
+    RECT virtualRect = {0, 0, 0, 0};
+    auto enumProc = [](HMONITOR hMon, HDC, LPRECT lprc, LPARAM data) -> BOOL {
+        RECT* vr = reinterpret_cast<RECT*>(data);
+        vr->left = min(vr->left, lprc->left);
+        vr->top = min(vr->top, lprc->top);
+        vr->right = max(vr->right, lprc->right);
+        vr->bottom = max(vr->bottom, lprc->bottom);
+        return TRUE;
+    };
+    // Initialize extremes
+    virtualRect.left = LONG_MAX;
+    virtualRect.top = LONG_MAX;
+    virtualRect.right = LONG_MIN;
+    virtualRect.bottom = LONG_MIN;
+    EnumDisplayMonitors(NULL, NULL, reinterpret_cast<MONITORENUMPROC>(enumProc), reinterpret_cast<LPARAM>(&virtualRect));
+    LONG w = max(1, virtualRect.right - virtualRect.left);
+    LONG h = max(1, virtualRect.bottom - virtualRect.top);
+    virtual_desktop_diag_ = sqrt(static_cast<double>(w) * static_cast<double>(w) + static_cast<double>(h) * static_cast<double>(h));
+    if (virtual_desktop_diag_ <= 0.0) virtual_desktop_diag_ = 1.0;
+}
+
+void AppFocusTrackerPlugin::ResetDeltaCounters() {
+    delta_active_ms_ = 0;
+    delta_idle_ms_ = 0;
+    delta_keystrokes_ = 0;
+    delta_mouse_clicks_ = 0;
+    delta_scroll_ticks_ = 0;
+    delta_mouse_move_units_ = 0.0;
+}
+
+void AppFocusTrackerPlugin::ResetCumulativeCounters() {
+    cum_active_ms_ = 0;
+    cum_idle_ms_ = 0;
+    cum_keystrokes_ = 0;
+    cum_mouse_clicks_ = 0;
+    cum_scroll_ticks_ = 0;
+    cum_mouse_move_units_ = 0.0;
+    scroll_accumulator_ = 0.0;
+}
+
+void AppFocusTrackerPlugin::StartInputTracking() {
+    // Install low-level keyboard and mouse hooks
+    if (!g_keyboard_hook) {
+        g_keyboard_hook = SetWindowsHookExW(WH_KEYBOARD_LL, LowLevelKeyboardProc, GetModuleHandle(NULL), 0);
+    }
+    if (!g_mouse_hook) {
+        g_mouse_hook = SetWindowsHookExW(WH_MOUSE_LL, LowLevelMouseProc, GetModuleHandle(NULL), 0);
+        // Initialize last mouse point
+        POINT pt; GetCursorPos(&pt); last_mouse_point_ = pt;
+    }
+    input_supported_ = (g_keyboard_hook != nullptr) && (g_mouse_hook != nullptr);
+    input_permissions_granted_ = input_supported_;
+    StartInputSampler();
+}
+
+void AppFocusTrackerPlugin::StopInputTracking() {
+    StopInputSampler();
+    if (g_keyboard_hook) { UnhookWindowsHookEx(g_keyboard_hook); g_keyboard_hook = nullptr; }
+    if (g_mouse_hook) { UnhookWindowsHookEx(g_mouse_hook); g_mouse_hook = nullptr; }
+}
+
+void AppFocusTrackerPlugin::StartInputSampler() {
+    if (input_sampler_running_) return;
+    input_sampler_running_ = true;
+    input_sampler_thread_ = std::thread([this]() {
+        while (input_sampler_running_) {
+            int slice_ms = config_.inputSamplingIntervalMs;
+            auto now = std::chrono::steady_clock::now();
+            {
+                std::lock_guard<std::mutex> guard(input_mutex_);
+                auto since_last = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_input_time_).count();
+                if (since_last < config_.inputIdleThresholdMs) {
+                    delta_active_ms_ += slice_ms;
+                    cum_active_ms_ += slice_ms;
+                } else {
+                    delta_idle_ms_ += slice_ms;
+                    cum_idle_ms_ += slice_ms;
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(slice_ms));
+        }
+    });
+}
+
+void AppFocusTrackerPlugin::StopInputSampler() {
+    if (!input_sampler_running_) return;
+    input_sampler_running_ = false;
+    if (input_sampler_thread_.joinable()) input_sampler_thread_.join();
+}
 
 // ------------------- UIAutomation Helpers (Windows) --------------------
 
@@ -680,7 +775,39 @@ FocusTrackerConfig FocusTrackerConfig::FromMap(const flutter::EncodableMap& map)
             }
         }
     }
-    
+    // Input activity tracking fields
+    it = map.find(flutter::EncodableValue("enableInputActivityTracking"));
+    if (it != map.end() && std::holds_alternative<bool>(it->second)) {
+        config.enableInputActivityTracking = std::get<bool>(it->second);
+    }
+    it = map.find(flutter::EncodableValue("inputSamplingIntervalMs"));
+    if (it != map.end()) {
+        if (std::holds_alternative<int>(it->second)) {
+            config.inputSamplingIntervalMs = std::get<int>(it->second);
+        } else if (std::holds_alternative<int64_t>(it->second)) {
+            config.inputSamplingIntervalMs = static_cast<int>(std::get<int64_t>(it->second));
+        }
+    }
+    it = map.find(flutter::EncodableValue("inputIdleThresholdMs"));
+    if (it != map.end()) {
+        if (std::holds_alternative<int>(it->second)) {
+            config.inputIdleThresholdMs = std::get<int>(it->second);
+        } else if (std::holds_alternative<int64_t>(it->second)) {
+            config.inputIdleThresholdMs = static_cast<int>(std::get<int64_t>(it->second));
+        }
+    }
+    it = map.find(flutter::EncodableValue("normalizeMouseToVirtualDesktop"));
+    if (it != map.end() && std::holds_alternative<bool>(it->second)) {
+        config.normalizeMouseToVirtualDesktop = std::get<bool>(it->second);
+    }
+    it = map.find(flutter::EncodableValue("countKeyRepeat"));
+    if (it != map.end() && std::holds_alternative<bool>(it->second)) {
+        config.countKeyRepeat = std::get<bool>(it->second);
+    }
+    it = map.find(flutter::EncodableValue("includeMiddleButtonClicks"));
+    if (it != map.end() && std::holds_alternative<bool>(it->second)) {
+        config.includeMiddleButtonClicks = std::get<bool>(it->second);
+    }
     return config;
 }
 
@@ -702,7 +829,13 @@ flutter::EncodableMap FocusTrackerConfig::ToMap() const {
         includedList.push_back(flutter::EncodableValue(app));
     }
     map[flutter::EncodableValue("includedApps")] = flutter::EncodableValue(includedList);
-    
+    // Input activity tracking fields
+    map[flutter::EncodableValue("enableInputActivityTracking")] = flutter::EncodableValue(enableInputActivityTracking);
+    map[flutter::EncodableValue("inputSamplingIntervalMs")] = flutter::EncodableValue(inputSamplingIntervalMs);
+    map[flutter::EncodableValue("inputIdleThresholdMs")] = flutter::EncodableValue(inputIdleThresholdMs);
+    map[flutter::EncodableValue("normalizeMouseToVirtualDesktop")] = flutter::EncodableValue(normalizeMouseToVirtualDesktop);
+    map[flutter::EncodableValue("countKeyRepeat")] = flutter::EncodableValue(countKeyRepeat);
+    map[flutter::EncodableValue("includeMiddleButtonClicks")] = flutter::EncodableValue(includeMiddleButtonClicks);
     return map;
 }
 
@@ -735,6 +868,8 @@ flutter::EncodableMap AppInfo::ToMap() const {
 // Global variables for event handling
 static AppFocusTrackerPlugin* g_plugin_instance = nullptr;
 static HWINEVENTHOOK g_event_hook = nullptr;
+static HHOOK g_keyboard_hook = nullptr;
+static HHOOK g_mouse_hook = nullptr;
 
 // Window event callback
 void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, 
@@ -744,6 +879,76 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd,
         g_plugin_instance->OnWindowFocusChanged(hwnd);
     }
 }
+// -------------------- Low-Level Input Hook Callbacks --------------------
+LRESULT CALLBACK AppFocusTrackerPlugin::LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
+    if (nCode >= 0 && g_plugin_instance && g_plugin_instance->is_tracking_) {
+        KBDLLHOOKSTRUCT* p = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
+        if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) {
+            std::lock_guard<std::mutex> guard(g_plugin_instance->input_mutex_);
+            g_plugin_instance->last_input_time_ = std::chrono::steady_clock::now();
+            // Windows key repeat is delivered as repeated WM_KEYDOWN messages. Honor config_.countKeyRepeat
+            bool count = true;
+            if (!g_plugin_instance->config_.countKeyRepeat) {
+                // Detect repeat: key still pressed (rudimentary)
+                DWORD vk = p->vkCode;
+                if (GetAsyncKeyState(vk) & 0x8000) {
+                    count = false;
+                }
+            }
+            if (count) {
+                g_plugin_instance->delta_keystrokes_ += 1;
+                g_plugin_instance->cum_keystrokes_ += 1;
+            }
+        }
+    }
+    return CallNextHookEx(g_keyboard_hook, nCode, wParam, lParam);
+}
+
+LRESULT CALLBACK AppFocusTrackerPlugin::LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
+    if (nCode >= 0 && g_plugin_instance && g_plugin_instance->is_tracking_) {
+        MSLLHOOKSTRUCT* p = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
+        std::lock_guard<std::mutex> guard(g_plugin_instance->input_mutex_);
+        g_plugin_instance->last_input_time_ = std::chrono::steady_clock::now();
+        switch (wParam) {
+            case WM_LBUTTONDOWN:
+            case WM_RBUTTONDOWN:
+                g_plugin_instance->delta_mouse_clicks_ += 1;
+                g_plugin_instance->cum_mouse_clicks_ += 1;
+                break;
+            case WM_MBUTTONDOWN:
+                if (g_plugin_instance->config_.includeMiddleButtonClicks) {
+                    g_plugin_instance->delta_mouse_clicks_ += 1;
+                    g_plugin_instance->cum_mouse_clicks_ += 1;
+                }
+                break;
+            case WM_MOUSEWHEEL: {
+                short delta = GET_WHEEL_DELTA_WPARAM(p->mouseData);
+                g_plugin_instance->scroll_accumulator_ += static_cast<double>(delta) / 120.0;
+                int full = static_cast<int>(g_plugin_instance->scroll_accumulator_ > 0 ? floor(g_plugin_instance->scroll_accumulator_) : ceil(g_plugin_instance->scroll_accumulator_));
+                g_plugin_instance->scroll_accumulator_ -= static_cast<double>(full);
+                if (full != 0) {
+                    g_plugin_instance->delta_scroll_ticks_ += abs(full);
+                    g_plugin_instance->cum_scroll_ticks_ += abs(full);
+                }
+                break; }
+            case WM_MOUSEMOVE: {
+                if (g_plugin_instance->config_.normalizeMouseToVirtualDesktop) {
+                    POINT pt = p->pt;
+                    POINT last = g_plugin_instance->last_mouse_point_;
+                    double dx = static_cast<double>(pt.x - last.x);
+                    double dy = static_cast<double>(pt.y - last.y);
+                    double mag = sqrt(dx*dx + dy*dy);
+                    double units = (g_plugin_instance->virtual_desktop_diag_ > 0) ? (mag / g_plugin_instance->virtual_desktop_diag_) : 0.0;
+                    g_plugin_instance->delta_mouse_move_units_ += units;
+                    g_plugin_instance->cum_mouse_move_units_ += units;
+                    g_plugin_instance->last_mouse_point_ = pt;
+                }
+                break; }
+        }
+    }
+    return CallNextHookEx(g_mouse_hook, nCode, wParam, lParam);
+}
+
 
 // Add after global variables
 static const wchar_t kMsgWindowClassName[] = L"AppFocusTrackerMsgWnd";
@@ -898,6 +1103,8 @@ AppFocusTrackerPlugin::AppFocusTrackerPlugin()
     
     g_plugin_instance = this;
     CreateMessageWindow();
+    last_input_time_ = std::chrono::steady_clock::now();
+    ComputeVirtualDesktopDiagonal();
     
     if (kHasDebugger) {
         DebugLog("AppFocusTrackerPlugin: Constructor completed");
@@ -1004,9 +1211,14 @@ void AppFocusTrackerPlugin::HandleMethodCall(
         
         if (testHook != NULL) {
             UnhookWinEvent(testHook);
+            // For input tracking, low level hooks require no extra permission typically
+            input_supported_ = true;
+            input_permissions_granted_ = true;
             result->Success(flutter::EncodableValue(true));
         } else {
             // If hooks fail, it might be due to UAC or antivirus
+            input_supported_ = false;
+            input_permissions_granted_ = false;
             result->Success(flutter::EncodableValue(false));
         }
     }
@@ -1156,6 +1368,10 @@ void AppFocusTrackerPlugin::StartTracking() {
     if (config_.includeMetadata && config_.enableBrowserTabTracking) {
         StartBrowserTabTracking();
     }
+    // Start input tracking if enabled
+    if (config_.enableInputActivityTracking) {
+        StartInputTracking();
+    }
     
     // Send initial focus event
     SendCurrentFocusEvent();
@@ -1190,6 +1406,8 @@ void AppFocusTrackerPlugin::StopTracking() {
     
     // Stop browser tab tracking
     StopBrowserTabTracking();
+    // Stop input tracking
+    StopInputTracking();
     
     // Send final focus lost event
     if (current_process_id_ != 0) {
@@ -1230,6 +1448,13 @@ void AppFocusTrackerPlugin::OnWindowFocusChanged(HWND hwnd) {
         current_process_id_ = proc_info.processId;
         current_focused_window_ = hwnd;
         focus_start_time_ = current_time;
+        // Reset counters when app changes
+        if (config_.enableInputActivityTracking) {
+            std::lock_guard<std::mutex> guard(input_mutex_);
+            ResetCumulativeCounters();
+            ResetDeltaCounters();
+            last_input_time_ = std::chrono::steady_clock::now();
+        }
         
         // Send focus gained event
         AppInfo app_info = CreateAppInfo(hwnd, !on_platform_thread);
@@ -1259,6 +1484,22 @@ void AppFocusTrackerPlugin::SendPeriodicUpdate() {
     
     DebugLog("SendPeriodicUpdate: Sending periodic update");
     
+    // Attribute active/idle for the sampling interval here as well
+    if (config_.enableInputActivityTracking && input_sampler_running_ == false) {
+        // Do a synchronous sample
+        auto now = std::chrono::steady_clock::now();
+        auto ms = static_cast<int>(config_.inputSamplingIntervalMs);
+        std::lock_guard<std::mutex> guard(input_mutex_);
+        auto since_last = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_input_time_).count();
+        if (since_last < config_.inputIdleThresholdMs) {
+            delta_active_ms_ += ms;
+            cum_active_ms_ += ms;
+        } else {
+            delta_idle_ms_ += ms;
+            cum_idle_ms_ += ms;
+        }
+    }
+
     auto current_time = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(current_time - focus_start_time_).count();
     
@@ -1422,6 +1663,41 @@ void AppFocusTrackerPlugin::SendFocusEvent(const AppInfo& app_info, const std::s
     
     if (config_.includeMetadata && !app_info.metadata.empty()) {
         event[flutter::EncodableValue("metadata")] = flutter::EncodableValue(app_info.metadata);
+    }
+    // Inject input activity payload when enabled
+    if (config_.enableInputActivityTracking) {
+        std::lock_guard<std::mutex> guard(input_mutex_);
+        flutter::EncodableMap input;
+        input[flutter::EncodableValue("supported")] = flutter::EncodableValue(input_supported_);
+        input[flutter::EncodableValue("permissionsGranted")] = flutter::EncodableValue(input_permissions_granted_);
+        flutter::EncodableMap delta;
+        delta[flutter::EncodableValue("activeMs")] = flutter::EncodableValue(delta_active_ms_);
+        delta[flutter::EncodableValue("idleMs")] = flutter::EncodableValue(delta_idle_ms_);
+        delta[flutter::EncodableValue("keystrokes")] = flutter::EncodableValue(delta_keystrokes_);
+        delta[flutter::EncodableValue("mouseClicks")] = flutter::EncodableValue(delta_mouse_clicks_);
+        delta[flutter::EncodableValue("scrollTicks")] = flutter::EncodableValue(delta_scroll_ticks_);
+        delta[flutter::EncodableValue("mouseMoveScreenUnits")] = flutter::EncodableValue(delta_mouse_move_units_);
+        flutter::EncodableMap cumulative;
+        cumulative[flutter::EncodableValue("activeMs")] = flutter::EncodableValue(cum_active_ms_);
+        cumulative[flutter::EncodableValue("idleMs")] = flutter::EncodableValue(cum_idle_ms_);
+        cumulative[flutter::EncodableValue("keystrokes")] = flutter::EncodableValue(cum_keystrokes_);
+        cumulative[flutter::EncodableValue("mouseClicks")] = flutter::EncodableValue(cum_mouse_clicks_);
+        cumulative[flutter::EncodableValue("scrollTicks")] = flutter::EncodableValue(cum_scroll_ticks_);
+        cumulative[flutter::EncodableValue("mouseMoveScreenUnits")] = flutter::EncodableValue(cum_mouse_move_units_);
+        input[flutter::EncodableValue("delta")] = flutter::EncodableValue(delta);
+        input[flutter::EncodableValue("cumulative")] = flutter::EncodableValue(cumulative);
+        event[flutter::EncodableValue("input")] = flutter::EncodableValue(input);
+        if (event_type == "durationUpdate") {
+            ResetDeltaCounters();
+        }
+        if (event_type == "gained") {
+            ResetCumulativeCounters();
+            ResetDeltaCounters();
+        }
+        if (event_type == "lost") {
+            ResetCumulativeCounters();
+            ResetDeltaCounters();
+        }
     }
     
     // Queue the event for processing on the main thread

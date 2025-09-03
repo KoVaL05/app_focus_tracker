@@ -1,4 +1,5 @@
 import 'browser_tab_info.dart';
+import 'input_activity.dart';
 import '../utils/map_conversion.dart';
 
 /// Represents a single application focus event with timing information.
@@ -34,6 +35,10 @@ class FocusEvent {
   /// Additional metadata about the application (version, icon path, etc.)
   final Map<String, dynamic>? metadata;
 
+  /// Optional aggregated input activity information for this event.
+  /// Present only when input activity tracking is enabled and supported.
+  final InputActivity? input;
+
   /// Whether the focused application is a recognised web browser
   bool get isBrowser => (metadata?['isBrowser'] as bool?) ?? false;
 
@@ -63,6 +68,7 @@ class FocusEvent {
     String? eventId,
     this.sessionId,
     this.metadata,
+    this.input,
   })  : timestamp = timestamp ?? DateTime.now(),
         eventId = eventId ?? _generateEventId();
 
@@ -84,6 +90,13 @@ class FocusEvent {
       eventId: json['eventId'] as String?,
       sessionId: json['sessionId'] as String?,
       metadata: safeMapConversion(json['metadata']),
+      input: (() {
+        final raw = json['input'];
+        if (raw is Map<String, dynamic>) {
+          return InputActivity.fromJson(raw);
+        }
+        return null;
+      })(),
     );
   }
 
@@ -99,6 +112,7 @@ class FocusEvent {
       'eventId': eventId,
       'sessionId': sessionId,
       'metadata': metadata,
+      'input': input?.toJson(),
     };
   }
 
@@ -117,6 +131,7 @@ class FocusEvent {
       eventId: _generateEventId(),
       sessionId: sessionId,
       metadata: metadata,
+      input: input,
     );
   }
 
@@ -132,6 +147,7 @@ class FocusEvent {
       eventId: eventId,
       sessionId: sessionId,
       metadata: metadata,
+      input: input,
     );
   }
 

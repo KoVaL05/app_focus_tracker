@@ -15,6 +15,13 @@ void main() {
         expect(config.enableBatching, isFalse);
         expect(config.maxBatchSize, equals(10));
         expect(config.maxBatchWaitMs, equals(5000));
+        // New input tracking defaults
+        expect(config.enableInputActivityTracking, isFalse);
+        expect(config.inputSamplingIntervalMs, equals(1000));
+        expect(config.inputIdleThresholdMs, equals(5000));
+        expect(config.normalizeMouseToVirtualDesktop, isTrue);
+        expect(config.countKeyRepeat, isTrue);
+        expect(config.includeMiddleButtonClicks, isTrue);
       });
 
       test('creates config with custom values', () {
@@ -30,6 +37,12 @@ void main() {
           enableBatching: true,
           maxBatchSize: 20,
           maxBatchWaitMs: 3000,
+          enableInputActivityTracking: true,
+          inputSamplingIntervalMs: 750,
+          inputIdleThresholdMs: 4000,
+          normalizeMouseToVirtualDesktop: false,
+          countKeyRepeat: false,
+          includeMiddleButtonClicks: false,
         );
 
         expect(config.updateIntervalMs, equals(2000));
@@ -40,6 +53,12 @@ void main() {
         expect(config.enableBatching, isTrue);
         expect(config.maxBatchSize, equals(20));
         expect(config.maxBatchWaitMs, equals(3000));
+        expect(config.enableInputActivityTracking, isTrue);
+        expect(config.inputSamplingIntervalMs, equals(750));
+        expect(config.inputIdleThresholdMs, equals(4000));
+        expect(config.normalizeMouseToVirtualDesktop, isFalse);
+        expect(config.countKeyRepeat, isFalse);
+        expect(config.includeMiddleButtonClicks, isFalse);
       });
     });
 
@@ -106,6 +125,12 @@ void main() {
         expect(json['enableBatching'], isTrue);
         expect(json['maxBatchSize'], equals(15));
         expect(json['maxBatchWaitMs'], equals(4000));
+        expect(json['enableInputActivityTracking'], isFalse);
+        expect(json['inputSamplingIntervalMs'], equals(1500));
+        expect(json['inputIdleThresholdMs'], equals(5000));
+        expect(json['normalizeMouseToVirtualDesktop'], isTrue);
+        expect(json['countKeyRepeat'], isTrue);
+        expect(json['includeMiddleButtonClicks'], isTrue);
       });
 
       test('creates from JSON correctly', () {
@@ -118,6 +143,12 @@ void main() {
           'enableBatching': true,
           'maxBatchSize': 15,
           'maxBatchWaitMs': 4000,
+          'enableInputActivityTracking': true,
+          'inputSamplingIntervalMs': 800,
+          'inputIdleThresholdMs': 4500,
+          'normalizeMouseToVirtualDesktop': false,
+          'countKeyRepeat': false,
+          'includeMiddleButtonClicks': false,
         };
 
         final config = FocusTrackerConfig.fromJson(json);
@@ -130,6 +161,12 @@ void main() {
         expect(config.enableBatching, isTrue);
         expect(config.maxBatchSize, equals(15));
         expect(config.maxBatchWaitMs, equals(4000));
+        expect(config.enableInputActivityTracking, isTrue);
+        expect(config.inputSamplingIntervalMs, equals(800));
+        expect(config.inputIdleThresholdMs, equals(4500));
+        expect(config.normalizeMouseToVirtualDesktop, isFalse);
+        expect(config.countKeyRepeat, isFalse);
+        expect(config.includeMiddleButtonClicks, isFalse);
       });
 
       test('handles missing fields with defaults', () {

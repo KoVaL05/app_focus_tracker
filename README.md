@@ -9,6 +9,7 @@ A Flutter plugin for tracking application focus changes across macOS and Windows
 - **Application Information**: Detailed metadata about running applications
 - **Browser Tab Extraction**: Automatic detection and parsing of web browser tabs (domain, URL, title)
 - **Browser Tab Change Detection**: Track browser tab changes as regular focus events when tabs change within the same browser application
+ - **Input Activity Tracking (optional)**: Aggregate keyboard/mouse activity per focused app, including per-interval deltas and cumulative stats (no content captured)
 - **Permission Management**: Automatic handling of platform-specific permissions
 - **Performance Optimized**: Efficient event handling with configurable update intervals
 - **Comprehensive Testing**: Extensive test suite covering unit, integration, and performance tests
@@ -125,6 +126,13 @@ FocusTrackerConfig(
   maxEventBufferSize: 1000,     // Maximum events to buffer
   includeMetadata: true,        // Include detailed app metadata
   enableBrowserTabTracking: true, // Track browser tab changes as focus events
+  // Input Activity Tracking (disabled by default)
+  enableInputActivityTracking: true,
+  inputSamplingIntervalMs: 1000,
+  inputIdleThresholdMs: 5000,
+  normalizeMouseToVirtualDesktop: true,
+  countKeyRepeat: true,
+  includeMiddleButtonClicks: true,
 )
 ```
 
@@ -164,6 +172,7 @@ class FocusEvent {
   final DateTime timestamp;
   final Duration? duration;
   final Map<String, dynamic>? metadata;
+  final InputActivity? input; // Present when input tracking enabled and supported
   
   /// Whether the focused application is a recognised web browser
   bool get isBrowser;
@@ -171,6 +180,34 @@ class FocusEvent {
   /// Parsed browser tab info when [isBrowser] is true
   BrowserTabInfo? get browserTab;
 }
+#### InputActivity
+```dart
+class InputActivityDelta {
+  final int activeMs;
+  final int idleMs;
+  final int keystrokes;
+  final int mouseClicks;
+  final int scrollTicks;
+  final double mouseMoveScreenUnits;
+}
+
+class InputActivityCumulative {
+  final int activeMs;
+  final int idleMs;
+  final int keystrokes;
+  final int mouseClicks;
+  final int scrollTicks;
+  final double mouseMoveScreenUnits;
+}
+
+class InputActivity {
+  final InputActivityDelta delta;           // Since last event
+  final InputActivityCumulative cumulative; // Since focus gained
+  final bool supported;
+  final bool permissionsGranted;
+}
+```
+
 ```
 
 #### AppInfo
