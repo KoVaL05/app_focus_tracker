@@ -726,18 +726,22 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
         guard inputTap == nil else { return }
         guard hasAccessibilityPermissions() else { return }
 
-        let mask = (
-            (1 << CGEventType.keyDown.rawValue) |
-            (1 << CGEventType.flagsChanged.rawValue) |
-            (1 << CGEventType.leftMouseDown.rawValue) |
-            (1 << CGEventType.rightMouseDown.rawValue) |
-            (1 << CGEventType.otherMouseDown.rawValue) |
-            (1 << CGEventType.scrollWheel.rawValue) |
-            (1 << CGEventType.mouseMoved.rawValue) |
-            (1 << CGEventType.leftMouseDragged.rawValue) |
-            (1 << CGEventType.rightMouseDragged.rawValue) |
-            (1 << CGEventType.otherMouseDragged.rawValue)
-        )
+        // Build the event mask incrementally to avoid complex type-checking.
+        func maskBit(_ type: CGEventType) -> CGEventMask {
+            return CGEventMask(1) << CGEventMask(type.rawValue)
+        }
+
+        var eventsMask: CGEventMask = 0
+        eventsMask |= maskBit(.keyDown)
+        eventsMask |= maskBit(.flagsChanged)
+        eventsMask |= maskBit(.leftMouseDown)
+        eventsMask |= maskBit(.rightMouseDown)
+        eventsMask |= maskBit(.otherMouseDown)
+        eventsMask |= maskBit(.scrollWheel)
+        eventsMask |= maskBit(.mouseMoved)
+        eventsMask |= maskBit(.leftMouseDragged)
+        eventsMask |= maskBit(.rightMouseDragged)
+        eventsMask |= maskBit(.otherMouseDragged)
 
         let callback: CGEventTapCallBack = { [weak self] (_, type, event, _) -> Unmanaged<CGEvent>? in
             guard let self = self, self.isTracking else { return Unmanaged.passUnretained(event) }
@@ -809,7 +813,7 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
             options: .defaultTap,
-            eventsOfInterest: CGEventMask(mask),
+            eventsOfInterest: eventsMask,
             callback: callback,
             userInfo: nil
         ) {
@@ -1123,7 +1127,7 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
         let durationMicroseconds = Int(duration * 1_000_000)
         let timestamp = Date()
 
-        var focusEvent = FocusEvent(
+        let focusEvent = FocusEvent(
             appName: appInfo.name,
             appIdentifier: appInfo.identifier,
             timestamp: timestamp,

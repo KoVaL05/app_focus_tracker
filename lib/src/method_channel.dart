@@ -34,7 +34,6 @@ class MethodChannelAppFocusTracker extends AppFocusTrackerPlatform {
   FocusTrackerConfig? _currentConfig;
 
   // Retry and degradation state
-  int _retryCount = 0;
   final int _maxRetries = 3;
   final Duration _retryDelay = const Duration(seconds: 1);
   bool _degradedMode = false;
@@ -47,7 +46,6 @@ class MethodChannelAppFocusTracker extends AppFocusTrackerPlatform {
 
   // Session management
   String? _currentSessionId;
-  DateTime? _sessionStartTime;
 
   @override
   Future<String> getPlatformName() async {
@@ -188,7 +186,6 @@ class MethodChannelAppFocusTracker extends AppFocusTrackerPlatform {
 
     // Start new session
     _currentSessionId = _generateSessionId();
-    _sessionStartTime = DateTime.now();
 
     return _withRetry('startTracking', () async {
       try {
@@ -197,7 +194,6 @@ class MethodChannelAppFocusTracker extends AppFocusTrackerPlatform {
         });
         _currentConfig = config;
         _isTracking = true;
-        _retryCount = 0;
         _degradedMode = false;
         _lastSuccessfulOperation = DateTime.now();
 
@@ -222,7 +218,6 @@ class MethodChannelAppFocusTracker extends AppFocusTrackerPlatform {
         _isTracking = false;
         _currentConfig = null;
         _currentSessionId = null;
-        _sessionStartTime = null;
         _degradedMode = false;
 
         await _closeEventStream();
@@ -472,7 +467,6 @@ class MethodChannelAppFocusTracker extends AppFocusTrackerPlatform {
 
           // Update success indicators
           _lastSuccessfulOperation = DateTime.now();
-          _retryCount = 0;
 
           // Exit degraded mode if we're receiving events
           if (_degradedMode) {
