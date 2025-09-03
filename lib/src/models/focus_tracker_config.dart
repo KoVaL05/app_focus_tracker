@@ -148,6 +148,7 @@ class FocusTrackerConfig {
 
   /// Converts this [FocusTrackerConfig] to a JSON map.
   Map<String, dynamic> toJson() {
+    final effectiveSampling = inputSamplingIntervalMs == 1000 ? updateIntervalMs : inputSamplingIntervalMs;
     return {
       'updateIntervalMs': updateIntervalMs,
       'includeMetadata': includeMetadata,
@@ -159,7 +160,7 @@ class FocusTrackerConfig {
       'maxBatchWaitMs': maxBatchWaitMs,
       'enableBrowserTabTracking': enableBrowserTabTracking,
       'enableInputActivityTracking': enableInputActivityTracking,
-      'inputSamplingIntervalMs': inputSamplingIntervalMs,
+      'inputSamplingIntervalMs': effectiveSampling,
       'inputIdleThresholdMs': inputIdleThresholdMs,
       'normalizeMouseToVirtualDesktop': normalizeMouseToVirtualDesktop,
       'countKeyRepeat': countKeyRepeat,

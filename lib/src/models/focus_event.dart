@@ -91,9 +91,9 @@ class FocusEvent {
       sessionId: json['sessionId'] as String?,
       metadata: safeMapConversion(json['metadata']),
       input: (() {
-        final raw = json['input'];
-        if (raw is Map<String, dynamic>) {
-          return InputActivity.fromJson(raw);
+        final inputJson = safeMapConversion(json['input']);
+        if (inputJson != null) {
+          return InputActivity.fromJson(inputJson);
         }
         return null;
       })(),
