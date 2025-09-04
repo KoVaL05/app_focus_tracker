@@ -178,6 +178,7 @@ class FocusEvent {
     switch (eventType) {
       case FocusEventType.gained:
       case FocusEventType.lost:
+      case FocusEventType.tabChange:
         return true;
       case FocusEventType.durationUpdate:
         // Only consider duration updates significant if they represent substantial time
@@ -258,4 +259,7 @@ enum FocusEventType {
 
   /// Duration update for currently focused application
   durationUpdate,
+
+  /// Tab or window title changed within the same application
+  tabChange,
 }

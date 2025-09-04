@@ -461,7 +461,42 @@ class _MyAppState extends State<MyApp> {
         return '🔴';
       case FocusEventType.durationUpdate:
         return '🔄';
+      case FocusEventType.tabChange:
+        return '🟦';
     }
+  }
+
+  String? _formatTabChangeDetails(FocusEvent event) {
+    final meta = event.metadata;
+    if (meta == null) return null;
+
+    final titleChange = meta['titleChange'];
+    if (titleChange is Map) {
+      final from = titleChange['from'];
+      final to = titleChange['to'];
+      if (from is String || to is String) {
+        final fromStr = (from is String && from.isNotEmpty) ? from : '—';
+        final toStr = (to is String && to.isNotEmpty) ? to : '—';
+        return 'Title: $fromStr → $toStr';
+      }
+    }
+
+    final prevTab = meta['previousTab'];
+    final currTab = meta['currentTab'];
+    String? prevTitle;
+    String? currTitle;
+    if (prevTab is Map) {
+      final t = prevTab['title'];
+      if (t is String && t.isNotEmpty) prevTitle = t;
+    }
+    if (currTab is Map) {
+      final t = currTab['title'];
+      if (t is String && t.isNotEmpty) currTitle = t;
+    }
+    if (prevTitle != null || currTitle != null) {
+      return 'Tab: ${prevTitle ?? '—'} → ${currTitle ?? '—'}';
+    }
+    return null;
   }
 
   @override
@@ -603,6 +638,17 @@ class _MyAppState extends State<MyApp> {
                                   Text(
                                     '${event.eventType.name} • ${_formatDuration(Duration(microseconds: event.durationMicroseconds))}',
                                   ),
+                                  if (event.eventType == FocusEventType.tabChange) ...[
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      _formatTabChangeDetails(event) ?? 'Tab/Title changed',
+                                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                            fontStyle: FontStyle.italic,
+                                          ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
                                   if (event.isBrowser && event.browserTab != null) ...[
                                     Text(
                                       '🌐 ${event.browserTab!.browserType} • ${event.browserTab!.url ?? "Unknown"}',

@@ -47,6 +47,16 @@ class MethodChannelAppFocusTracker extends AppFocusTrackerPlatform {
   // Session management
   String? _currentSessionId;
 
+  // Title-change segmentation state (Dart-side synthetic segmentation for non-browser apps)
+  String? _lastAppKey;
+  String? _lastWindowTitle;
+  int _titleSegmentOffsetMicros = 0;
+  bool _suppressNextEvent = false;
+  String? _lastBrowserTabKey;
+  Map<String, dynamic>? _lastBrowserTabMap;
+  int? _pendingBrowserLostDurationMicros;
+  FocusEvent? _pendingBrowserLostEvent;
+
   @override
   Future<String> getPlatformName() async {
     return _withRetry('getPlatformName', () async {
@@ -462,8 +472,183 @@ class MethodChannelAppFocusTracker extends AppFocusTrackerPlatform {
             }
           }
 
-          final focusEvent = FocusEvent.fromJson(eventMap);
-          _streamManager?.addEvent(focusEvent);
+          // Build the base event first for easier property access
+          final incomingEvent = FocusEvent.fromJson(eventMap);
+
+          // Initialize/reset segmentation state when stream begins or app switches
+          final currentAppKey = _buildAppKey(incomingEvent);
+
+          // Helper: extract window title if available
+          final currentWindowTitle = _extractWindowTitle(incomingEvent);
+
+          // If app changed, reset segmentation state and forward event as-is
+          if (_lastAppKey == null || currentAppKey != _lastAppKey) {
+            // If we had a pending browser lost (we were waiting to see if it was a tab switch),
+            // flush it now because this is a true app switch.
+            if (_pendingBrowserLostEvent != null) {
+              _streamManager?.addEvent(_pendingBrowserLostEvent!);
+              _pendingBrowserLostEvent = null;
+              _pendingBrowserLostDurationMicros = null;
+            }
+            _lastAppKey = currentAppKey;
+            _titleSegmentOffsetMicros = 0;
+            _lastWindowTitle = currentWindowTitle;
+            _suppressNextEvent = false;
+            // Initialize browser tab state if available
+            _lastBrowserTabMap = _extractBrowserTab(incomingEvent);
+            _lastBrowserTabKey = _buildBrowserTabKey(incomingEvent);
+            _streamManager?.addEvent(incomingEvent);
+          } else {
+            // Same app: handle title-change segmentation for NON-browser apps only
+            final includeMetadata = _currentConfig?.includeMetadata == true;
+            final isNonBrowser = !incomingEvent.isBrowser;
+
+            // Normalize browser tab change pair into a single tabChange event
+            if (includeMetadata && !isNonBrowser) {
+              final currentTabMap = _extractBrowserTab(incomingEvent);
+              final currentTabKey = _buildBrowserTabKey(incomingEvent);
+
+              if (incomingEvent.eventType == FocusEventType.lost) {
+                // Record the lost event and duration to decide after we see the next gained
+                _pendingBrowserLostDurationMicros = incomingEvent.durationMicroseconds;
+                _pendingBrowserLostEvent = incomingEvent;
+                return;
+              }
+
+              if (incomingEvent.eventType == FocusEventType.gained) {
+                // Compare previous vs current and emit a single tabChange
+                final prevKey = _lastBrowserTabKey;
+                final prevMap = _lastBrowserTabMap;
+                final lossDuration = _pendingBrowserLostDurationMicros ?? 0;
+
+                if (prevKey != null && currentTabKey != null && prevKey != currentTabKey) {
+                  final tabChangeEvent = FocusEvent(
+                    appName: incomingEvent.appName,
+                    appIdentifier: incomingEvent.appIdentifier,
+                    timestamp: incomingEvent.timestamp,
+                    durationMicroseconds: lossDuration,
+                    processId: incomingEvent.processId,
+                    eventType: FocusEventType.tabChange,
+                    sessionId: incomingEvent.sessionId,
+                    metadata: _augmentMetadataWithTabChange(incomingEvent.metadata, prevMap, currentTabMap),
+                    input: incomingEvent.input,
+                  );
+                  _streamManager?.addEvent(tabChangeEvent);
+                  // Update last tab to current
+                  _lastBrowserTabKey = currentTabKey;
+                  _lastBrowserTabMap = currentTabMap;
+                  _pendingBrowserLostDurationMicros = null;
+                  _pendingBrowserLostEvent = null;
+                  return; // swallow gained
+                }
+
+                // No change detected; forward gained
+                _streamManager?.addEvent(incomingEvent);
+                if (currentTabKey != null) {
+                  _lastBrowserTabKey = currentTabKey;
+                  _lastBrowserTabMap = currentTabMap;
+                }
+                _pendingBrowserLostDurationMicros = null;
+                _pendingBrowserLostEvent = null;
+                return;
+              }
+
+              // For duration updates or other events, forward and update last tab state
+              // If we had a pending browser lost but the next event wasn't the gained pair,
+              // flush the pending lost now.
+              if (_pendingBrowserLostEvent != null) {
+                _streamManager?.addEvent(_pendingBrowserLostEvent!);
+                _pendingBrowserLostEvent = null;
+                _pendingBrowserLostDurationMicros = null;
+              }
+              _streamManager?.addEvent(incomingEvent);
+              if (currentTabKey != null) {
+                _lastBrowserTabKey = currentTabKey;
+                _lastBrowserTabMap = currentTabMap;
+              }
+              return;
+            }
+
+            if (includeMetadata && isNonBrowser && incomingEvent.eventType == FocusEventType.durationUpdate) {
+              final prevTitle = _lastWindowTitle;
+              final nextTitle = currentWindowTitle;
+
+              final titleChanged = (prevTitle != null && nextTitle != null && prevTitle != nextTitle);
+
+              if (titleChanged) {
+                // Emit a single tabChange event representing the title switch
+                final elapsedSinceFocusStart = incomingEvent.durationMicroseconds;
+                final segmentElapsed = math.max(0, elapsedSinceFocusStart - _titleSegmentOffsetMicros);
+                final tabChangeEvent = FocusEvent(
+                  appName: incomingEvent.appName,
+                  appIdentifier: incomingEvent.appIdentifier,
+                  timestamp: incomingEvent.timestamp,
+                  durationMicroseconds: segmentElapsed,
+                  processId: incomingEvent.processId,
+                  eventType: FocusEventType.tabChange,
+                  sessionId: incomingEvent.sessionId,
+                  metadata: _augmentMetadataWithTitleChange(incomingEvent.metadata, prevTitle, nextTitle),
+                  input: incomingEvent.input,
+                );
+                _streamManager?.addEvent(tabChangeEvent);
+
+                // Update segmentation baseline to the current elapsed time and title
+                _titleSegmentOffsetMicros = elapsedSinceFocusStart;
+                _lastWindowTitle = nextTitle;
+                return; // handled
+              }
+
+              // If in a segmented window (offset set), adjust durations to start from split
+              if (_titleSegmentOffsetMicros > 0) {
+                final adjustedDuration = math.max(0, incomingEvent.durationMicroseconds - _titleSegmentOffsetMicros);
+                final adjustedEvent = FocusEvent(
+                  appName: incomingEvent.appName,
+                  appIdentifier: incomingEvent.appIdentifier,
+                  timestamp: incomingEvent.timestamp,
+                  durationMicroseconds: adjustedDuration,
+                  processId: incomingEvent.processId,
+                  eventType: incomingEvent.eventType,
+                  sessionId: incomingEvent.sessionId,
+                  metadata: incomingEvent.metadata,
+                  input: incomingEvent.input,
+                );
+                _streamManager?.addEvent(adjustedEvent);
+              } else {
+                _streamManager?.addEvent(incomingEvent);
+              }
+            } else if (includeMetadata &&
+                isNonBrowser &&
+                incomingEvent.eventType == FocusEventType.lost &&
+                _titleSegmentOffsetMicros > 0) {
+              // Adjust the final lost duration to be relative to the last split
+              final adjustedDuration = math.max(0, incomingEvent.durationMicroseconds - _titleSegmentOffsetMicros);
+              final adjustedLost = FocusEvent(
+                appName: incomingEvent.appName,
+                appIdentifier: incomingEvent.appIdentifier,
+                timestamp: incomingEvent.timestamp,
+                durationMicroseconds: adjustedDuration,
+                processId: incomingEvent.processId,
+                eventType: FocusEventType.lost,
+                sessionId: incomingEvent.sessionId,
+                metadata: incomingEvent.metadata,
+                input: incomingEvent.input,
+              );
+              _streamManager?.addEvent(adjustedLost);
+              // Reset segmentation after app loses focus
+              _titleSegmentOffsetMicros = 0;
+              _lastWindowTitle = null;
+            } else {
+              // No special handling required
+              if (_suppressNextEvent) {
+                // Consume one event after a split to avoid duplicates in corner cases
+                _suppressNextEvent = false;
+                return;
+              }
+              _streamManager?.addEvent(incomingEvent);
+              // Keep the latest title for future comparisons
+              _lastWindowTitle = currentWindowTitle ?? _lastWindowTitle;
+            }
+          }
 
           // Update success indicators
           _lastSuccessfulOperation = DateTime.now();
@@ -490,6 +675,13 @@ class MethodChannelAppFocusTracker extends AppFocusTrackerPlatform {
     await _streamManager?.stop();
     await _streamManager?.dispose();
     _streamManager = null;
+    // Reset segmentation state
+    _lastAppKey = null;
+    _lastWindowTitle = null;
+    _titleSegmentOffsetMicros = 0;
+    _suppressNextEvent = false;
+    _lastBrowserTabKey = null;
+    _lastBrowserTabMap = null;
   }
 
   /// Handles errors with retry logic and graceful degradation.
@@ -541,6 +733,7 @@ class MethodChannelAppFocusTracker extends AppFocusTrackerPlatform {
         if (kDebugMode) {
           print('Failed to apply degraded configuration: $error');
         }
+        return false; // recover with no-op result to satisfy Future<bool>
       });
     }
   }
@@ -692,5 +885,77 @@ class MethodChannelAppFocusTracker extends AppFocusTrackerPlatform {
   /// Infers platform support based on the current platform.
   bool _inferPlatformSupport() {
     return Platform.isMacOS || Platform.isWindows;
+  }
+
+  String _buildAppKey(FocusEvent event) {
+    final id = event.appIdentifier ?? event.appName;
+    final pid = event.processId ?? -1;
+    return '$id:$pid';
+  }
+
+  String? _extractWindowTitle(FocusEvent event) {
+    final meta = event.metadata;
+    if (meta == null) return null;
+    final title = meta['windowTitle'];
+    if (title is String && title.isNotEmpty) return title;
+    // As a fallback, some platforms might provide a direct 'title'
+    final fallback = meta['title'];
+    if (fallback is String && fallback.isNotEmpty) return fallback;
+    return null;
+  }
+
+  Map<String, dynamic>? _extractBrowserTab(FocusEvent event) {
+    final meta = event.metadata;
+    if (meta == null) return null;
+    final tab = meta['browserTab'];
+    if (tab is Map<String, dynamic>) return tab;
+    return null;
+  }
+
+  String? _buildBrowserTabKey(FocusEvent event) {
+    final tab = _extractBrowserTab(event);
+    if (tab == null) return null;
+    final title = tab['title'];
+    final url = tab['url'];
+    final domain = tab['domain'];
+    return '${title ?? ''}|${url ?? ''}|${domain ?? ''}';
+  }
+
+  Map<String, dynamic> _augmentMetadataWithTitleChange(
+    Map<String, dynamic>? original,
+    String? fromTitle,
+    String? toTitle,
+  ) {
+    final updated = <String, dynamic>{};
+    if (original != null) {
+      updated.addAll(original);
+    }
+    updated['changeType'] = 'title';
+    updated['titleChange'] = {
+      'from': fromTitle,
+      'to': toTitle,
+    };
+    updated.removeWhere((key, value) => value == null);
+    return updated;
+  }
+
+  Map<String, dynamic> _augmentMetadataWithTabChange(
+    Map<String, dynamic>? original,
+    Map<String, dynamic>? previousTab,
+    Map<String, dynamic>? currentTab,
+  ) {
+    final updated = <String, dynamic>{};
+    if (original != null) {
+      updated.addAll(original);
+    }
+    updated['changeType'] = 'tab';
+    if (previousTab != null) {
+      updated['previousTab'] = previousTab;
+    }
+    if (currentTab != null) {
+      updated['currentTab'] = currentTab;
+    }
+    updated.removeWhere((key, value) => value == null);
+    return updated;
   }
 }
