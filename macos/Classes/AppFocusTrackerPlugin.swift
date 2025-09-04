@@ -990,7 +990,16 @@ public class AppFocusTrackerPlugin: NSObject, FlutterPlugin {
         if config?.enableInputActivityTracking == true && inputSamplingTimer == nil {
             sampleInputSlice()
         }
-        sendFocusEvent(for: currentApp, eventType: .durationUpdate, duration: duration)
+        // Refresh AppInfo snapshot so that metadata (e.g., windowTitle) reflects the
+        // most recent state for non-browser apps (e.g., Cursor file tab changes).
+        if let frontmost = NSWorkspace.shared.frontmostApplication {
+            let refreshed = createAppInfo(from: frontmost)
+            if refreshed.identifier == currentApp.identifier {
+                // Only update when the frontmost app matches the currently tracked one
+                self.currentFocusedApp = refreshed
+            }
+        }
+        sendFocusEvent(for: self.currentFocusedApp ?? currentApp, eventType: .durationUpdate, duration: duration)
     }
 
     // MARK: - Browser Tab Change Detection

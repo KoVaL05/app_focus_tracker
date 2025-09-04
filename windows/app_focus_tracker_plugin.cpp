@@ -1434,6 +1434,16 @@ void AppFocusTrackerPlugin::OnWindowFocusChanged(HWND hwnd) {
     ProcessInfo proc_info = GetProcessInfoFromWindow(hwnd);
     if (proc_info.processId == 0) return;
     
+    // If the foreground window changed within the same process, update the
+    // tracked window handle so periodic updates reflect the correct window
+    // title/metadata (e.g., editor file tab changes) without emitting focus
+    // gained/lost. We intentionally do not reset focus_start_time_ here so
+    // durations remain continuous for the app; Dart will segment on title changes.
+    if (current_process_id_ == proc_info.processId && current_focused_window_ != hwnd) {
+        current_focused_window_ = hwnd;
+        DebugLog("OnWindowFocusChanged: Updated current_focused_window_ within same process");
+    }
+
     auto current_time = std::chrono::steady_clock::now();
     
     // Send focus lost event for previous app
@@ -1503,6 +1513,8 @@ void AppFocusTrackerPlugin::SendPeriodicUpdate() {
     auto current_time = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(current_time - focus_start_time_).count();
     
+    // Refresh CreateAppInfo on each tick so metadata (windowTitle) stays current
+    // even when the focused window handle changes within the same process.
     AppInfo app_info = CreateAppInfo(current_focused_window_, true); // true = from_background_thread
     SendFocusEvent(app_info, "durationUpdate", duration);
 }
