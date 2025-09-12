@@ -210,23 +210,25 @@ static HHOOK g_mouse_hook = nullptr;
 
 // -------------------- Input Tracking Implementation ---------------------
 
+// Static monitor enumeration callback with proper calling convention
+static BOOL CALLBACK MonitorEnumProc(HMONITOR /*hMon*/, HDC /*hdc*/, LPRECT lprc, LPARAM data) {
+    RECT* vr = reinterpret_cast<RECT*>(data);
+    vr->left = min(vr->left, lprc->left);
+    vr->top = min(vr->top, lprc->top);
+    vr->right = max(vr->right, lprc->right);
+    vr->bottom = max(vr->bottom, lprc->bottom);
+    return TRUE;
+}
+
 void AppFocusTrackerPlugin::ComputeVirtualDesktopDiagonal() {
     // Compute union of monitor bounds
     RECT virtualRect = {0, 0, 0, 0};
-    auto enumProc = [](HMONITOR hMon, HDC, LPRECT lprc, LPARAM data) -> BOOL {
-        RECT* vr = reinterpret_cast<RECT*>(data);
-        vr->left = min(vr->left, lprc->left);
-        vr->top = min(vr->top, lprc->top);
-        vr->right = max(vr->right, lprc->right);
-        vr->bottom = max(vr->bottom, lprc->bottom);
-        return TRUE;
-    };
     // Initialize extremes
     virtualRect.left = LONG_MAX;
     virtualRect.top = LONG_MAX;
     virtualRect.right = LONG_MIN;
     virtualRect.bottom = LONG_MIN;
-    EnumDisplayMonitors(NULL, NULL, reinterpret_cast<MONITORENUMPROC>(enumProc), reinterpret_cast<LPARAM>(&virtualRect));
+    EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, reinterpret_cast<LPARAM>(&virtualRect));
     LONG w = max(1, virtualRect.right - virtualRect.left);
     LONG h = max(1, virtualRect.bottom - virtualRect.top);
     virtual_desktop_diag_ = sqrt(static_cast<double>(w) * static_cast<double>(w) + static_cast<double>(h) * static_cast<double>(h));
