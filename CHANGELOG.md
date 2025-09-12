@@ -1,3 +1,11 @@
+## 0.0.10
+
+### Windows Compilation Fixes
+
+- Fixed build errors C2065 related to `g_mouse_hook` being an undeclared identifier by declaring global hook variables (`g_plugin_instance`, `g_event_hook`, `g_keyboard_hook`, `g_mouse_hook`) before first use in `windows/app_focus_tracker_plugin.cpp`.
+- Removed duplicate later declarations to avoid redefinition and ensure consistent linkage.
+- Verified no further undefined symbol issues and ensured lints are clean.
+
 ## 0.0.9
 
 ### Input Activity Tracking (optional)

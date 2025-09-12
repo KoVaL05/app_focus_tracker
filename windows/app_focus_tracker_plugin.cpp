@@ -202,6 +202,12 @@ std::string GetFileVersion(const std::string& filePath) {
 
 } // namespace
 
+// Global variables for event handling
+static AppFocusTrackerPlugin* g_plugin_instance = nullptr;
+static HWINEVENTHOOK g_event_hook = nullptr;
+static HHOOK g_keyboard_hook = nullptr;
+static HHOOK g_mouse_hook = nullptr;
+
 // -------------------- Input Tracking Implementation ---------------------
 
 void AppFocusTrackerPlugin::ComputeVirtualDesktopDiagonal() {
@@ -864,12 +870,6 @@ flutter::EncodableMap AppInfo::ToMap() const {
     
     return map;
 }
-
-// Global variables for event handling
-static AppFocusTrackerPlugin* g_plugin_instance = nullptr;
-static HWINEVENTHOOK g_event_hook = nullptr;
-static HHOOK g_keyboard_hook = nullptr;
-static HHOOK g_mouse_hook = nullptr;
 
 // Window event callback
 void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, 
